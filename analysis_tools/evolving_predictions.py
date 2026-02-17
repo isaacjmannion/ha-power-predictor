@@ -12,6 +12,7 @@ HISTORY_CSV = os.path.join(HERE, 'history.csv')
 
 PREDICTION_FILES = [
     os.path.join(HERE, '1.txt'),
+    os.path.join(HERE, '2.txt'),
     # os.path.join(HERE, '48hr_2026-02-18.txt'),
     # os.path.join(HERE, '48hr_2026-02-19.txt'),
 ]
@@ -42,7 +43,8 @@ def load_predictions(path):
             elif line.startswith('value:'):
                 values.append(float(line.replace('value:', '').strip()))
     df = pd.DataFrame({'time': times, 'value': values})
-    df['time'] = pd.to_datetime(df['time'], utc=True).dt.tz_convert(TIMEZONE)
+    # Timestamps already contain offset info (e.g. +11:00) — don't force utc=True
+    df['time'] = pd.to_datetime(df['time']).dt.tz_convert(TIMEZONE)
     return df
 
 
