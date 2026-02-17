@@ -26,7 +26,12 @@ ports_description:
 webui: http://[HOST]:[PORT:8099]
 options:
   power_entity: "sensor.sigen_plant_consumed_power"
+<<<<<<< HEAD
+  temperature_entity: "sensor.weatherUnderground_temperature"
+  weather_forecast_entity: "weather.home"
+=======
   temperature_entity: "sensor.weather_temperature"
+>>>>>>> parent of 22cdfe1 (bug fixes)
   bin_size_minutes: 60
   n_power_lags: 10
   n_temp_lags: 5

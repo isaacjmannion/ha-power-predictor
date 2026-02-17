@@ -12,135 +12,148 @@ logger = logging.getLogger(__name__)
 
 class HomeAssistantClient:
     """Client for interacting with Home Assistant API."""
-    
+
     def __init__(self, base_url: str, token: str):
-        """
-        Initialize HA client.
-        
-        Args:
-            base_url: Base URL for HA (e.g., http://supervisor/core)
-            token: Supervisor token for authentication
-        """
         self.base_url = base_url.rstrip('/')
         self.headers = {
             'Authorization': f'Bearer {token}',
             'Content-Type': 'application/json'
         }
-    
+
     def get_history(
         self,
         entity_id: str,
         start_time: datetime,
         end_time: datetime = None
     ) -> List[Dict[str, Any]]:
-        """
-        Get historical data for an entity.
-        
-        Args:
-            entity_id: Entity ID to query
-            start_time: Start of history period
-            end_time: End of history period (default: now)
-        
-        Returns:
-            List of state dictionaries
-        """
         if end_time is None:
             end_time = datetime.now()
-        
-        # Format timestamps for API
+
         start_str = start_time.strftime('%Y-%m-%dT%H:%M:%S')
         end_str = end_time.strftime('%Y-%m-%dT%H:%M:%S')
-        
-        # Build URL
+
         url = f'{self.base_url}/api/history/period/{start_str}'
         params = {
             'filter_entity_id': entity_id,
             'end_time': end_str,
-            'minimal_response': 'true'
+            'minimal_response': 'true',
+            'significant_changes_only': 'true'
         }
-        
+
         logger.info(f"Fetching history for {entity_id} from {start_str} to {end_str}")
-        
+
         try:
-            response = requests.get(url, headers=self.headers, params=params, timeout=60)
+            response = requests.get(url, headers=self.headers, params=params, timeout=300)
             response.raise_for_status()
-            
+
             data = response.json()
-            
+
             if not data or not isinstance(data, list) or len(data) == 0:
                 logger.warning(f"No history data returned for {entity_id}")
                 return []
-            
-            # History returns list of lists, get first element
+
             entity_history = data[0] if isinstance(data[0], list) else data
-            
             logger.info(f"Retrieved {len(entity_history)} history records")
             return entity_history
-            
+
         except requests.exceptions.RequestException as e:
             logger.error(f"Failed to fetch history: {e}")
             raise
-    
+
+    def get_weather_forecast(
+        self,
+        entity_id: str,
+        forecast_type: str = 'hourly'
+    ) -> List[Dict[str, Any]]:
+        url = f'{self.base_url}/api/services/weather/get_forecasts?return_response'
+
+        payload = {
+            'entity_id': entity_id,
+            'type': forecast_type
+        }
+
+        logger.info(f"Fetching {forecast_type} weather forecast for {entity_id}")
+
+        try:
+            response = requests.post(url, headers=self.headers, json=payload, timeout=30)
+
+            logger.info(f"Response status: {response.status_code}")
+            if response.status_code != 200:
+                logger.error(f"Response text: {response.text}")
+
+            response.raise_for_status()
+
+            data = response.json()
+            logger.info(f"Response data keys: {data.keys() if isinstance(data, dict) else 'not a dict'}")
+
+            # Extract forecast from response.
+            # HA 2024.2+ wraps the result in a 'service_response' key:
+            # {'service_response': {entity_id: {'forecast': [...]}}}
+            forecasts = []
+
+            if isinstance(data, dict):
+                # HA 2024.2+ format
+                if 'service_response' in data:
+                    service_data = data['service_response']
+                    if entity_id in service_data:
+                        forecasts = service_data[entity_id].get('forecast', [])
+                    else:
+                        # Fall back to first entity in service_response
+                        for value in service_data.values():
+                            if isinstance(value, dict) and 'forecast' in value:
+                                forecasts = value['forecast']
+                                break
+                # Legacy direct entity key
+                elif entity_id in data:
+                    forecasts = data[entity_id].get('forecast', [])
+                # Legacy flat forecast key
+                elif 'forecast' in data:
+                    forecasts = data['forecast']
+
+            if forecasts:
+                logger.info(f"Retrieved {len(forecasts)} forecast records")
+            else:
+                logger.warning(f"No forecast data found in response: {data}")
+
+            return forecasts
+
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Failed to fetch weather forecast: {e}")
+            if hasattr(e, 'response') and e.response is not None:
+                logger.error(f"Response content: {e.response.text}")
+            raise
+
     def set_state(
         self,
         entity_id: str,
         state: Any,
         attributes: Dict[str, Any] = None
     ) -> bool:
-        """
-        Set state for an entity.
-        
-        Args:
-            entity_id: Entity ID to update
-            state: New state value
-            attributes: Optional attributes dict
-        
-        Returns:
-            True if successful
-        """
         url = f'{self.base_url}/api/states/{entity_id}'
-        
+
         payload = {
             'state': state,
             'attributes': attributes or {}
         }
-        
+
         try:
             response = requests.post(url, headers=self.headers, json=payload, timeout=10)
             response.raise_for_status()
             logger.info(f"Set state for {entity_id}: {state}")
             return True
-            
+
         except requests.exceptions.RequestException as e:
             logger.error(f"Failed to set state: {e}")
             return False
-    
+
     def create_prediction_sensors(
         self,
         predictions: List[Dict[str, Any]],
         source_entity: str
     ) -> bool:
-        """
-        Create/update prediction sensors in Home Assistant.
-        
-        Creates multiple sensors:
-        - sensor.power_prediction_next_1h
-        - sensor.power_prediction_next_6h
-        - sensor.power_prediction_next_12h
-        - sensor.power_prediction_next_24h
-        - sensor.power_prediction_next_48h
-        
-        Args:
-            predictions: List of prediction dicts with timestamp, actual, predicted
-            source_entity: Source entity ID for reference
-        
-        Returns:
-            True if successful
-        """
         if not predictions:
             return False
-        
-        # Calculate average predictions for different time windows
+
         windows = {
             '1h': 1,
             '6h': 6,
@@ -148,21 +161,19 @@ class HomeAssistantClient:
             '24h': 24,
             '48h': 48
         }
-        
+
         success = True
-        
+
         for window_name, hours in windows.items():
             if len(predictions) < hours:
                 continue
-            
-            # Get predictions for this window
+
             window_predictions = predictions[:hours]
             avg_prediction = sum(p['predicted'] for p in window_predictions) / len(window_predictions)
             max_prediction = max(p['predicted'] for p in window_predictions)
-            
-            # Create sensor
+
             entity_id = f'sensor.power_prediction_next_{window_name}'
-            
+
             attributes = {
                 'unit_of_measurement': 'kW',
                 'friendly_name': f'Power Prediction Next {window_name.upper()}',
@@ -173,34 +184,32 @@ class HomeAssistantClient:
                 'average': round(avg_prediction, 2),
                 'maximum': round(max_prediction, 2),
                 'predictions': [
-                    {
-                        'time': p['timestamp'],
-                        'value': round(p['predicted'], 2)
-                    }
+                    {'time': p['timestamp'], 'value': round(p['predicted'], 2)}
                     for p in window_predictions
                 ]
             }
-            
+
             if not self.set_state(entity_id, round(avg_prediction, 2), attributes):
                 success = False
-        
-        # Also create a sensor with full prediction data
-        entity_id = 'sensor.power_prediction_full'
-        attributes = {
-            'friendly_name': 'Power Prediction Full Dataset',
-            'icon': 'mdi:chart-line',
-            'source_entity': source_entity,
-            'predictions': [
-                {
-                    'time': p['timestamp'],
-                    'predicted': round(p['predicted'], 2),
-                    'actual': round(p.get('actual', 0), 2) if p.get('actual') else None
-                }
-                for p in predictions
-            ],
-            'count': len(predictions)
-        }
-        
-        self.set_state(entity_id, len(predictions), attributes)
-        
+
+        # Full prediction dataset sensor
+        self.set_state(
+            'sensor.power_prediction_full',
+            len(predictions),
+            {
+                'friendly_name': 'Power Prediction Full Dataset',
+                'icon': 'mdi:chart-line',
+                'source_entity': source_entity,
+                'predictions': [
+                    {
+                        'time': p['timestamp'],
+                        'predicted': round(p['predicted'], 2),
+                        'actual': round(p.get('actual', 0), 2) if p.get('actual') else None
+                    }
+                    for p in predictions
+                ],
+                'count': len(predictions)
+            }
+        )
+
         return success

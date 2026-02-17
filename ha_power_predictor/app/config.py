@@ -17,6 +17,7 @@ def get_config_from_env() -> Dict[str, Any]:
     return {
         'power_entity': os.getenv('POWER_ENTITY', 'sensor.power_consumption'),
         'temperature_entity': os.getenv('TEMPERATURE_ENTITY', 'sensor.temperature'),
+        'weather_forecast_entity': os.getenv('WEATHER_FORECAST_ENTITY', 'weather.home'),
         'bin_size_minutes': int(os.getenv('BIN_SIZE_MINUTES', '60')),
         'n_power_lags': int(os.getenv('N_POWER_LAGS', '10')),
         'n_temp_lags': int(os.getenv('N_TEMP_LAGS', '5')),
