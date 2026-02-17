@@ -101,16 +101,6 @@ Basic configuration:
 - **Discussions**: [GitHub Discussions](https://github.com/isaacjmannion/ha-power-predictor/discussions)
 - **Community**: [Home Assistant Forum Thread](#)
 
-## Contributing
-
-Contributions are welcome! Please:
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
 ## Changelog
 
 See [CHANGELOG.md](ha_power_predictor/CHANGELOG.md) for version history.
