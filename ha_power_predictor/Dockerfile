@@ -1,28 +1,23 @@
-ARG BUILD_FROM
-FROM $BUILD_FROM
+FROM python:3.11-slim-bookworm
 
-# Set shell
-SHELL ["/bin/bash", "-o", "pipefail", "-c"]
-
-# Install requirements
-RUN apk add --no-cache \
-    python3 \
-    py3-pip \
-    py3-numpy \
-    py3-scipy \
-    tzdata
+# Install bash and jq
+RUN apt-get update && apt-get install -y \
+    bash \
+    jq \
+    && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
 WORKDIR /app
 
 # Copy requirements and install Python dependencies
 COPY requirements.txt .
-RUN pip3 install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 
 # Copy application files
 COPY app/ ./app/
-COPY run.sh /
-RUN chmod a+x /run.sh
+COPY run.sh /run.sh
+RUN chmod +x /run.sh
 
 # Expose port
 EXPOSE 8099

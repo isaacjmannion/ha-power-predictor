@@ -11,7 +11,7 @@ arch:
   - armhf
   - armv7
   - i386
-url: https://github.com/yourusername/ha-power-predictor
+url: https://github.com/isaacmannion/ha-power-predictor
 startup: application
 boot: auto
 init: false
@@ -42,15 +42,15 @@ options:
 schema:
   power_entity: str
   temperature_entity: str
-  bin_size_minutes: int(15-1440)
-  n_power_lags: int(0-50)
-  n_temp_lags: int(0-20)
-  train_percentage: float(50.0-95.0)
-  quantile: float(0.5-0.99)
+  bin_size_minutes: int(15,1440)
+  n_power_lags: int(0,50)
+  n_temp_lags: int(0,20)
+  train_percentage: float(50.0,95.0)
+  quantile: float(0.5,0.99)
   use_dynamic_quantile: bool
-  peak_start: int(0-23)
-  peak_end: int(0-23)
-  peak_quantile: float(0.5-0.99)
-  offpeak_quantile: float(0.5-0.99)
-  history_days: int(7-365)
+  peak_start: int(0,23)
+  peak_end: int(0,23)
+  peak_quantile: float(0.5,0.99)
+  offpeak_quantile: float(0.5,0.99)
+  history_days: int(7,365)
   timezone: str

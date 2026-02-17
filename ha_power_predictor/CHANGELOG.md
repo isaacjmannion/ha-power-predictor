@@ -2,7 +2,7 @@
 
 All notable changes to this add-on will be documented in this file.
 
-## [1.0.0] - 2026-02-14
+## [0.1.0] - 2026-02-14
 
 ### Added
 - Initial release of HA Power Predictor add-on
@@ -23,3 +23,8 @@ All notable changes to this add-on will be documented in this file.
 - Responsive web interface
 - Comprehensive configuration options
 - ApexCharts integration examples
+
+## [0.1.0] - 2026-02-16
+
+### Added
+- Bug fixed to run as HA addon
