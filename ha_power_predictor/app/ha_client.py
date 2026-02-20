@@ -60,6 +60,66 @@ class HomeAssistantClient:
             logger.error(f"Failed to fetch history: {e}")
             raise
 
+    def get_statistics(
+        self,
+        entity_id: str,
+        start_time: datetime,
+        end_time: datetime = None,
+        period: str = 'hour'
+    ) -> List[Dict[str, Any]]:
+        """
+        Fetch hourly statistics from Home Assistant.
+        This returns pre-aggregated hourly data (mean, min, max) which is much more efficient
+        than fetching all raw state changes.
+        
+        Args:
+            entity_id: Sensor entity ID
+            start_time: Start of the time window
+            end_time: End of the time window (defaults to now)
+            period: Statistics period ('hour', 'day', 'week', 'month')
+        
+        Returns:
+            List of statistics records with 'start', 'mean', 'min', 'max' fields
+        """
+        if end_time is None:
+            end_time = datetime.now()
+
+        start_str = start_time.strftime('%Y-%m-%dT%H:%M:%S+00:00')
+        end_str = end_time.strftime('%Y-%m-%dT%H:%M:%S+00:00')
+
+        url = f'{self.base_url}/api/history/statistics_during_period'
+        params = {
+            'statistic_ids': entity_id,
+            'start_time': start_str,
+            'end_time': end_str,
+            'period': period
+        }
+
+        logger.info(f"Fetching {period}ly statistics for {entity_id} from {start_str} to {end_str}")
+
+        try:
+            response = requests.get(url, headers=self.headers, params=params, timeout=300)
+            response.raise_for_status()
+
+            data = response.json()
+
+            if not data or not isinstance(data, dict):
+                logger.warning(f"No statistics data returned for {entity_id}")
+                return []
+
+            # Statistics API returns: {entity_id: [{start, mean, min, max, ...}, ...]}
+            if entity_id in data:
+                stats = data[entity_id]
+                logger.info(f"Retrieved {len(stats)} {period}ly statistics records")
+                return stats
+            else:
+                logger.warning(f"Entity {entity_id} not found in statistics response")
+                return []
+
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Failed to fetch statistics: {e}")
+            raise
+
     def get_weather_forecast(
         self,
         entity_id: str,

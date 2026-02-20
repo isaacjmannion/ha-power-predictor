@@ -168,3 +168,108 @@ def add_lagged_features(
 def get_default_features() -> List[str]:
     """Get the default feature set for training."""
     return ['year', 'month', 'day_of_week', 'hour', 'temperature']
+
+
+def process_ha_statistics(
+    power_stats: List[Dict[str, Any]],
+    temp_stats: List[Dict[str, Any]],
+    timezone: str = 'UTC'
+) -> pd.DataFrame:
+    """
+    Process Home Assistant statistics data (already hourly aggregated).
+    This is much faster than processing raw history data.
+    
+    Args:
+        power_stats: Hourly power statistics from HA statistics API
+        temp_stats: Hourly temperature statistics from HA statistics API
+        timezone: Timezone for timestamp localization
+    
+    Returns:
+        DataFrame with hourly binned data and temporal features
+    """
+    t_start = time.time()
+    _log(f"📊 Processing HA statistics (already hourly)...")
+    _log(f"   Input: {len(power_stats)} power records, {len(temp_stats)} temp records")
+
+    # --- Parse power statistics ---
+    _log("   [1/4] Parsing power statistics...")
+    t = time.time()
+    power_records = []
+    skipped = 0
+    for record in power_stats:
+        try:
+            timestamp = pd.to_datetime(record.get('start'))
+            # Use 'mean' field from statistics
+            mean_value = record.get('mean')
+            if mean_value is not None:
+                power_records.append({
+                    'timestamp': timestamp,
+                    'consumption': float(mean_value)
+                })
+            else:
+                skipped += 1
+        except (ValueError, TypeError, KeyError):
+            skipped += 1
+            continue
+
+    if not power_records:
+        raise ValueError("No valid power statistics found")
+
+    _log(f"   [1/4] Done — {len(power_records)} valid, {skipped} skipped ({time.time()-t:.1f}s)")
+
+    # --- Parse temperature statistics ---
+    _log("   [2/4] Parsing temperature statistics...")
+    t = time.time()
+    temp_records = []
+    skipped = 0
+    for record in temp_stats:
+        try:
+            timestamp = pd.to_datetime(record.get('start'))
+            mean_value = record.get('mean')
+            if mean_value is not None:
+                temp_records.append({
+                    'timestamp': timestamp,
+                    'temperature': float(mean_value)
+                })
+            else:
+                skipped += 1
+        except (ValueError, TypeError, KeyError):
+            skipped += 1
+            continue
+
+    if not temp_records:
+        raise ValueError("No valid temperature statistics found")
+
+    _log(f"   [2/4] Done — {len(temp_records)} valid, {skipped} skipped ({time.time()-t:.1f}s)")
+
+    # --- Build DataFrames ---
+    _log("   [3/4] Building DataFrames...")
+    t = time.time()
+    power_df = pd.DataFrame(power_records)
+    temp_df = pd.DataFrame(temp_records)
+    _log(f"   [3/4] Done ({time.time()-t:.1f}s)")
+
+    # --- Localize timestamps ---
+    _log(f"   [4/4] Localizing timestamps to {timezone}...")
+    t = time.time()
+    tz = pytz.timezone(timezone)
+    power_df['timestamp'] = power_df['timestamp'].dt.tz_convert(tz)
+    temp_df['timestamp'] = temp_df['timestamp'].dt.tz_convert(tz)
+
+    # --- Merge and add features ---
+    df_merged = pd.merge(power_df, temp_df, on='timestamp', how='inner')
+    df_merged = df_merged.sort_values('timestamp').reset_index(drop=True)
+
+    df_merged['year'] = df_merged['timestamp'].dt.year
+    df_merged['month'] = df_merged['timestamp'].dt.month
+    df_merged['day_of_week'] = df_merged['timestamp'].dt.dayofweek
+    df_merged['hour'] = df_merged['timestamp'].dt.hour
+    df_merged['minute'] = df_merged['timestamp'].dt.minute
+    _log(f"   [4/4] Done ({time.time()-t:.1f}s)")
+
+    total = time.time() - t_start
+    _log(f"✅ Processing complete: {len(df_merged)} hourly records — "
+         f"{df_merged['timestamp'].min()} → {df_merged['timestamp'].max()} "
+         f"(total {total:.1f}s)")
+
+    return df_merged

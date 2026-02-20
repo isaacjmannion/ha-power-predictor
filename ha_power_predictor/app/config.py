@@ -29,5 +29,6 @@ def get_config_from_env() -> Dict[str, Any]:
         'peak_quantile': float(os.getenv('PEAK_QUANTILE', '0.75')),
         'offpeak_quantile': float(os.getenv('OFFPEAK_QUANTILE', '0.50')),
         'history_days': int(os.getenv('HISTORY_DAYS', '90')),
-        'timezone': os.getenv('TIMEZONE', 'UTC')
+        'timezone': os.getenv('TIMEZONE', 'UTC'),
+        'use_hourly_statistics': os.getenv('USE_HOURLY_STATISTICS', 'true').lower() == 'true'
     }
