@@ -26,12 +26,8 @@ ports_description:
 webui: http://[HOST]:[PORT:8099]
 options:
   power_entity: "sensor.sigen_plant_consumed_power"
-<<<<<<< HEAD
   temperature_entity: "sensor.weatherUnderground_temperature"
   weather_forecast_entity: "weather.home"
-=======
-  temperature_entity: "sensor.weather_temperature"
->>>>>>> parent of 22cdfe1 (bug fixes)
   bin_size_minutes: 60
   n_power_lags: 10
   n_temp_lags: 5
@@ -42,11 +38,13 @@ options:
   peak_end: 22
   peak_quantile: 0.75
   offpeak_quantile: 0.50
-  history_days: 90
+  history_days: 30
   timezone: "Australia/Sydney"
+  use_hourly_statistics: true
 schema:
   power_entity: str
   temperature_entity: str
+  weather_forecast_entity: str
   bin_size_minutes: int(15,1440)
   n_power_lags: int(0,50)
   n_temp_lags: int(0,20)
@@ -59,3 +57,4 @@ schema:
   offpeak_quantile: float(0.5,0.99)
   history_days: int(7,365)
   timezone: str
+  use_hourly_statistics: bool
