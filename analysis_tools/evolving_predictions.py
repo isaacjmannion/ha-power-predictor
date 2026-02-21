@@ -13,6 +13,7 @@ HISTORY_CSV = os.path.join(HERE, 'history.csv')
 PREDICTION_FILES = [
     os.path.join(HERE, '1.txt'),
     os.path.join(HERE, '2.txt'),
+    os.path.join(HERE, '3.txt'),
     # os.path.join(HERE, '48hr_2026-02-18.txt'),
     # os.path.join(HERE, '48hr_2026-02-19.txt'),
 ]
