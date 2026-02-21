@@ -23,7 +23,8 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # Copy application files
 COPY app/ ./app/
 COPY run.sh /run.sh
-RUN chmod +x /run.sh
+RUN sed -i 's/\r$//' /run.sh && \
+    chmod +x /run.sh
 
 # Expose port
 EXPOSE 8099

@@ -84,18 +84,19 @@ class HomeAssistantClient:
         if end_time is None:
             end_time = datetime.now()
 
-        start_str = start_time.strftime('%Y-%m-%dT%H:%M:%S+00:00')
-        end_str = end_time.strftime('%Y-%m-%dT%H:%M:%S+00:00')
-
-        url = f'{self.base_url}/api/history/statistics_during_period'
+        # Format: /api/history/period/{start_time} with entity filter
+        start_str = start_time.strftime('%Y-%m-%dT%H:%M:%S')
+        
+        url = f'{self.base_url}/api/history/period/{start_str}'
         params = {
-            'statistic_ids': entity_id,
-            'start_time': start_str,
-            'end_time': end_str,
-            'period': period
+            'filter_entity_id': entity_id,
+            'end_time': end_time.strftime('%Y-%m-%dT%H:%M:%S'),
+            'minimal_response': 'true',
+            'no_attributes': 'true'
         }
 
-        logger.info(f"Fetching {period}ly statistics for {entity_id} from {start_str} to {end_str}")
+        logger.info(f"Fetching statistics-style history for {entity_id} from {start_str}")
+        logger.info(f"Note: Using history API with minimal_response for efficiency")
 
         try:
             response = requests.get(url, headers=self.headers, params=params, timeout=300)
@@ -103,18 +104,49 @@ class HomeAssistantClient:
 
             data = response.json()
 
-            if not data or not isinstance(data, dict):
-                logger.warning(f"No statistics data returned for {entity_id}")
+            if not data or not isinstance(data, list) or len(data) == 0:
+                logger.warning(f"No history data returned for {entity_id}")
                 return []
 
-            # Statistics API returns: {entity_id: [{start, mean, min, max, ...}, ...]}
-            if entity_id in data:
-                stats = data[entity_id]
-                logger.info(f"Retrieved {len(stats)} {period}ly statistics records")
-                return stats
-            else:
-                logger.warning(f"Entity {entity_id} not found in statistics response")
+            entity_history = data[0] if isinstance(data[0], list) else data
+            
+            # Convert to hourly bins on the fly
+            import pandas as pd
+            records = []
+            for record in entity_history:
+                try:
+                    records.append({
+                        'last_changed': record.get('last_changed') or record.get('last_updated'),
+                        'state': record.get('state')
+                    })
+                except:
+                    continue
+            
+            if not records:
                 return []
+            
+            # Create DataFrame and bin to hourly
+            df = pd.DataFrame(records)
+            df['timestamp'] = pd.to_datetime(df['last_changed'])
+            df['state'] = pd.to_numeric(df['state'], errors='coerce')
+            df = df.dropna(subset=['state'])
+            
+            # Bin to hourly
+            df['hour_bin'] = df['timestamp'].dt.floor('1H')
+            hourly = df.groupby('hour_bin')['state'].agg(['mean', 'min', 'max']).reset_index()
+            
+            # Convert to statistics format
+            stats = []
+            for _, row in hourly.iterrows():
+                stats.append({
+                    'start': row['hour_bin'].isoformat(),
+                    'mean': float(row['mean']),
+                    'min': float(row['min']),
+                    'max': float(row['max'])
+                })
+            
+            logger.info(f"Aggregated {len(entity_history)} records into {len(stats)} hourly bins")
+            return stats
 
         except requests.exceptions.RequestException as e:
             logger.error(f"Failed to fetch statistics: {e}")

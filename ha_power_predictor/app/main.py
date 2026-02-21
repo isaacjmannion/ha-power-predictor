@@ -13,7 +13,7 @@ import pytz
 import traceback
 
 from .ha_client import HomeAssistantClient
-from .data_processing import process_ha_data, add_lagged_features, get_default_features
+from .data_processing import process_ha_data, process_ha_statistics, add_lagged_features, get_default_features
 from .models import QuantileRegressionModel, predict_iterative
 from .config import get_config_from_env
 
@@ -49,6 +49,11 @@ def fetch_power():
     """Fetch historical power consumption data from Home Assistant."""
     try:
         config = get_config_from_env()
+        use_stats = config.get('use_hourly_statistics', False)
+
+        app.logger.info(f"=== FETCH POWER DEBUG ===")
+        app.logger.info(f"use_hourly_statistics config value: {use_stats}")
+        app.logger.info(f"USE_HOURLY_STATISTICS env var: {os.getenv('USE_HOURLY_STATISTICS')}")
 
         ha_client = HomeAssistantClient(
             base_url=os.getenv('HA_URL', 'http://supervisor/core'),
@@ -59,7 +64,12 @@ def fetch_power():
         end_time = datetime.now()
         start_time = end_time - timedelta(days=config['history_days'])
 
-        power_data = ha_client.get_history(config['power_entity'], start_time, end_time)
+        if use_stats:
+            app.logger.info("✓ Using hourly statistics API (should fetch ~720 records for 30 days)...")
+            power_data = ha_client.get_statistics(config['power_entity'], start_time, end_time, 'hour')
+        else:
+            app.logger.info("✗ Using raw history API (will fetch many thousands of records)...")
+            power_data = ha_client.get_history(config['power_entity'], start_time, end_time)
 
         if not power_data:
             return jsonify({'error': 'No power data found'}), 400
@@ -67,14 +77,24 @@ def fetch_power():
         app_state['power_data'] = power_data
         app_state['last_update']['power'] = datetime.now().isoformat()
 
+        # Extract values for statistics (different structure for stats vs history)
         values = []
-        for record in power_data:
-            try:
-                state_str = str(record.get('state', ''))
-                if state_str.lower() not in ('unknown', 'unavailable', 'none', ''):
-                    values.append(float(state_str))
-            except (ValueError, TypeError, AttributeError):
-                continue
+        if use_stats:
+            for record in power_data:
+                try:
+                    mean_value = record.get('mean')
+                    if mean_value is not None:
+                        values.append(float(mean_value))
+                except (ValueError, TypeError, KeyError):
+                    continue
+        else:
+            for record in power_data:
+                try:
+                    state_str = str(record.get('state', ''))
+                    if state_str.lower() not in ('unknown', 'unavailable', 'none', ''):
+                        values.append(float(state_str))
+                except (ValueError, TypeError, AttributeError):
+                    continue
 
         if not values:
             return jsonify({'error': 'No valid power values found in data'}), 400
@@ -86,18 +106,30 @@ def fetch_power():
             'max': round(max(values), 2),
             'mean': round(sum(values) / len(values), 2),
             'start_time': start_time.isoformat(),
-            'end_time': end_time.isoformat()
+            'end_time': end_time.isoformat(),
+            'source': 'hourly_statistics' if use_stats else 'raw_history'
         }
 
+        # Sample records (different structure)
         sample = []
-        for record in power_data[:10]:
-            try:
-                sample.append({
-                    'timestamp': str(record.get('last_changed', record.get('last_updated', 'N/A'))),
-                    'state': str(record.get('state', 'N/A'))
-                })
-            except Exception:
-                continue
+        if use_stats:
+            for record in power_data[:10]:
+                try:
+                    sample.append({
+                        'timestamp': str(record.get('start', 'N/A')),
+                        'mean': str(record.get('mean', 'N/A'))
+                    })
+                except Exception:
+                    continue
+        else:
+            for record in power_data[:10]:
+                try:
+                    sample.append({
+                        'timestamp': str(record.get('last_changed', record.get('last_updated', 'N/A'))),
+                        'state': str(record.get('state', 'N/A'))
+                    })
+                except Exception:
+                    continue
 
         return jsonify({
             'success': True,
@@ -116,6 +148,10 @@ def fetch_weather_history():
     """Fetch historical weather/temperature data from Home Assistant."""
     try:
         config = get_config_from_env()
+        use_stats = config.get('use_hourly_statistics', False)
+
+        app.logger.info(f"=== FETCH TEMPERATURE DEBUG ===")
+        app.logger.info(f"use_hourly_statistics config value: {use_stats}")
 
         temp_entity = config.get('temperature_entity')
         if not temp_entity:
@@ -130,7 +166,12 @@ def fetch_weather_history():
         end_time = datetime.now()
         start_time = end_time - timedelta(days=config['history_days'])
 
-        temp_data = ha_client.get_history(temp_entity, start_time, end_time)
+        if use_stats:
+            app.logger.info("✓ Using hourly statistics API for temperature...")
+            temp_data = ha_client.get_statistics(temp_entity, start_time, end_time, 'hour')
+        else:
+            app.logger.info("✗ Using raw history API for temperature...")
+            temp_data = ha_client.get_history(temp_entity, start_time, end_time)
 
         if not temp_data:
             return jsonify({'error': f'No temperature history found for {temp_entity}'}), 400
@@ -138,14 +179,24 @@ def fetch_weather_history():
         app_state['weather_history'] = temp_data
         app_state['last_update']['weather_history'] = datetime.now().isoformat()
 
+        # Extract values (different structure for stats vs history)
         values = []
-        for record in temp_data:
-            try:
-                state_str = str(record.get('state', ''))
-                if state_str.lower() not in ('unknown', 'unavailable', 'none', ''):
-                    values.append(float(state_str))
-            except (ValueError, TypeError, AttributeError):
-                continue
+        if use_stats:
+            for record in temp_data:
+                try:
+                    mean_value = record.get('mean')
+                    if mean_value is not None:
+                        values.append(float(mean_value))
+                except (ValueError, TypeError, KeyError):
+                    continue
+        else:
+            for record in temp_data:
+                try:
+                    state_str = str(record.get('state', ''))
+                    if state_str.lower() not in ('unknown', 'unavailable', 'none', ''):
+                        values.append(float(state_str))
+                except (ValueError, TypeError, AttributeError):
+                    continue
 
         if not values:
             return jsonify({'error': 'No valid temperature values found in data'}), 400
@@ -158,18 +209,30 @@ def fetch_weather_history():
             'mean': round(sum(values) / len(values), 1),
             'start_time': start_time.isoformat(),
             'end_time': end_time.isoformat(),
-            'entity': temp_entity
+            'entity': temp_entity,
+            'source': 'hourly_statistics' if use_stats else 'raw_history'
         }
 
+        # Sample records (different structure)
         sample = []
-        for record in temp_data[:10]:
-            try:
-                sample.append({
-                    'timestamp': str(record.get('last_changed', record.get('last_updated', 'N/A'))),
-                    'state': str(record.get('state', 'N/A'))
-                })
-            except Exception:
-                continue
+        if use_stats:
+            for record in temp_data[:10]:
+                try:
+                    sample.append({
+                        'timestamp': str(record.get('start', 'N/A')),
+                        'mean': str(record.get('mean', 'N/A'))
+                    })
+                except Exception:
+                    continue
+        else:
+            for record in temp_data[:10]:
+                try:
+                    sample.append({
+                        'timestamp': str(record.get('last_changed', record.get('last_updated', 'N/A'))),
+                        'state': str(record.get('state', 'N/A'))
+                    })
+                except Exception:
+                    continue
 
         return jsonify({
             'success': True,
@@ -334,15 +397,25 @@ def train_model():
             return jsonify({'error': 'Please fetch weather history first'}), 400
 
         config = get_config_from_env()
+        use_stats = config.get('use_hourly_statistics', False)
 
         # --- Process historical data ---
         app.logger.info("Processing historical data...")
-        df = process_ha_data(
-            app_state['power_data'],
-            app_state['weather_history'],
-            bin_size_minutes=config['bin_size_minutes'],
-            timezone=config['timezone']
-        )
+        if use_stats:
+            # Use statistics processing (already hourly)
+            df = process_ha_statistics(
+                app_state['power_data'],
+                app_state['weather_history'],
+                timezone=config['timezone']
+            )
+        else:
+            # Use raw history processing with binning
+            df = process_ha_data(
+                app_state['power_data'],
+                app_state['weather_history'],
+                bin_size_minutes=config['bin_size_minutes'],
+                timezone=config['timezone']
+            )
 
         if len(df) < 100:
             return jsonify({'error': f'Insufficient data: only {len(df)} records'}), 400
