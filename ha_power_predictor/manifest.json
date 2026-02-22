@@ -1,0 +1,13 @@
+{
+  "domain": "ha_power_predictor",
+  "name": "HA Power Predictor",
+  "version": "1.0.0",
+  "config_flow": true,
+  "dependencies": ["recorder"],
+  "requirements": [
+    "numpy>=1.24.0",
+    "pandas>=2.0.0"
+  ],
+  "iot_class": "local_polling",
+  "codeowners": []
+}

@@ -1,0 +1,71 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Entity Configuration",
+        "description": "Select the Home Assistant entities to use for power prediction. All three entities must have long-term statistics enabled in the recorder.",
+        "data": {
+          "power_entity": "Power Consumption Entity",
+          "temperature_entity": "Temperature Entity",
+          "weather_forecast_entity": "Weather Forecast Entity"
+        },
+        "data_description": {
+          "power_entity": "The sensor tracking your total power consumption (e.g. sensor.power_consumption). Must have long-term statistics.",
+          "temperature_entity": "An outdoor temperature sensor (e.g. sensor.outdoor_temperature). Must have long-term statistics.",
+          "weather_forecast_entity": "A weather entity that provides an hourly forecast (e.g. weather.home)."
+        }
+      },
+      "model": {
+        "title": "Model Parameters",
+        "description": "Configure the prediction model. The defaults work well for most setups.",
+        "data": {
+          "history_days": "History Days",
+          "update_interval_minutes": "Update Interval (minutes)",
+          "n_power_lags": "Power Lag Features",
+          "n_temp_lags": "Temperature Lag Features",
+          "use_dynamic_quantile": "Use Dynamic Quantile (different peak / off-peak levels)",
+          "quantile": "Quantile (used when dynamic quantile is off)",
+          "peak_start": "Peak Period Start Hour (0–23)",
+          "peak_end": "Peak Period End Hour (0–23)",
+          "peak_quantile": "Peak Period Quantile",
+          "offpeak_quantile": "Off-Peak Quantile"
+        },
+        "data_description": {
+          "history_days": "How many days of historical data to train on (7–365).",
+          "update_interval_minutes": "How often to retrain and refresh predictions. Minimum 15 minutes.",
+          "n_power_lags": "Number of previous hourly power readings to include as features (0 = none).",
+          "n_temp_lags": "Number of previous hourly temperature readings to include as features (0 = none).",
+          "use_dynamic_quantile": "When enabled, a higher quantile is used during peak hours and a lower quantile off-peak, giving more conservative estimates when consumption is typically highest.",
+          "quantile": "The quantile to predict (0.5 = median, 0.75 = 75th percentile). Only used when dynamic quantile is off.",
+          "peak_start": "Hour of day when the peak period begins (inclusive).",
+          "peak_end": "Hour of day when the peak period ends (inclusive).",
+          "peak_quantile": "Quantile applied during peak hours.",
+          "offpeak_quantile": "Quantile applied during off-peak hours."
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to Home Assistant recorder."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Model Parameters",
+        "description": "Adjust model parameters. Changes take effect immediately after saving.",
+        "data": {
+          "history_days": "History Days",
+          "update_interval_minutes": "Update Interval (minutes)",
+          "n_power_lags": "Power Lag Features",
+          "n_temp_lags": "Temperature Lag Features",
+          "use_dynamic_quantile": "Use Dynamic Quantile",
+          "quantile": "Quantile (used when dynamic quantile is off)",
+          "peak_start": "Peak Period Start Hour",
+          "peak_end": "Peak Period End Hour",
+          "peak_quantile": "Peak Period Quantile",
+          "offpeak_quantile": "Off-Peak Quantile"
+        }
+      }
+    }
+  }
+}
