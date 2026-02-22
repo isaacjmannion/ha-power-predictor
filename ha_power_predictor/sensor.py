@@ -5,9 +5,11 @@ Registers two sensors:
   - sensor.power_prediction_24h  — covers the next 24 hours
   - sensor.power_prediction_48h  — covers the next 48 hours
 
-Both sensors share the same coordinator data. Their state is the predicted
-power value for the next (current) hour; the full hourly breakdown is exposed
-as an attribute so it can be used in Lovelace charts and automations.
+Attribute format:
+  source_entity        str  — entity ID used for training
+  history_days         int  — days of history the model was trained on
+  last_forecast_update str  — human-readable local datetime of last pipeline run
+  forecast             list — [{time: ISO-8601 local, value: kW}, ...]
 """
 
 from __future__ import annotations
@@ -21,6 +23,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
 from .coordinator import PowerPredictorCoordinator
@@ -41,26 +44,18 @@ async def async_setup_entry(
 
 class PowerPredictionSensor(CoordinatorEntity[PowerPredictorCoordinator], SensorEntity):
     """
-    A sensor exposing the quantile-regression power prediction for a given
-    forecast window (24 h or 48 h).
+    Power prediction sensor for a given forecast window (24 h or 48 h).
 
     State
     -----
-    The predicted kW value for the *next* full hour — i.e. predictions[0].
-    Both the 24h and 48h sensors share this same immediate next-hour value
-    as their state; they differ only in how many hours their attribute list spans.
+    Predicted kW for the next full hour (predictions[0]).
 
     Attributes
     ----------
-    hourly_predictions  List of {"timestamp": ISO-8601, "predicted": kW} dicts
-                        covering the full window (24 or 48 entries).
-    peak                Highest predicted value in the window (kW).
-    average             Mean predicted value across the window (kW).
-    window_hours        Integer window length for this sensor.
-    forecast_start      ISO-8601 timestamp of the first prediction.
-    forecast_end        ISO-8601 timestamp of the last prediction.
-    source_entity       The power consumption entity used to train the model.
-    last_trained        ISO-8601 timestamp of the last completed pipeline run.
+    source_entity        Entity ID of the power consumption sensor used for training.
+    history_days         Number of days of history the model trained on.
+    last_forecast_update Friendly local-time string of when the pipeline last ran.
+    forecast             List of {time, value} dicts for each hour in the window.
     """
 
     _attr_device_class = SensorDeviceClass.POWER
@@ -80,45 +75,55 @@ class PowerPredictionSensor(CoordinatorEntity[PowerPredictorCoordinator], Sensor
         self._attr_unique_id = f"{entry.entry_id}_prediction_{window_hours}h"
         self._attr_name = f"Power Prediction {window_hours}h"
 
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
-
     @property
     def _window_predictions(self) -> list[dict]:
-        """Slice of the coordinator predictions for this window."""
+        """Coordinator predictions sliced to this sensor's window."""
         if not self.coordinator.data:
             return []
         return self.coordinator.data.get("predictions", [])[: self._window_hours]
 
-    # ------------------------------------------------------------------
-    # SensorEntity interface
-    # ------------------------------------------------------------------
-
     @property
     def native_value(self) -> float | None:
-        """Current state — predicted power for the next hour."""
+        """State — predicted kW for the next hour."""
         preds = self._window_predictions
-        if not preds:
-            return None
-        return preds[0]["predicted"]
+        return preds[0]["predicted"] if preds else None
 
     @property
     def extra_state_attributes(self) -> dict:
-        """Rich attributes for charting and automations."""
+        """Attributes matching the documented format."""
+        data = self.coordinator.data
+        if not data:
+            return {}
+
         preds = self._window_predictions
         if not preds:
             return {}
 
-        predicted_values = [p["predicted"] for p in preds]
+        # Format last_updated as a friendly local datetime string
+        last_updated_raw = data.get("last_updated", "")
+        try:
+            last_updated_local = dt_util.as_local(
+                dt_util.parse_datetime(last_updated_raw)
+            ).strftime("%B %-d, %Y at %H:%M:%S")
+        except (TypeError, ValueError, AttributeError):
+            last_updated_local = last_updated_raw
+
+        # Build forecast list: {time: ISO local with offset, value: kW}
+        forecast = []
+        for p in preds:
+            try:
+                utc_dt = dt_util.parse_datetime(p["timestamp"])
+                local_dt = dt_util.as_local(utc_dt)
+                forecast.append({
+                    "time": local_dt.isoformat(),
+                    "value": p["predicted"],
+                })
+            except (TypeError, ValueError, AttributeError):
+                continue
 
         return {
-            "hourly_predictions": preds,
-            "window_hours": self._window_hours,
-            "peak": round(max(predicted_values), 3),
-            "average": round(sum(predicted_values) / len(predicted_values), 3),
-            "forecast_start": preds[0]["timestamp"],
-            "forecast_end": preds[-1]["timestamp"],
-            "source_entity": self.coordinator.data.get("power_entity"),
-            "last_trained": self.coordinator.data.get("last_updated"),
+            "source_entity": data.get("power_entity"),
+            "history_days": data.get("history_days"),
+            "last_forecast_update": last_updated_local,
+            "forecast": forecast,
         }

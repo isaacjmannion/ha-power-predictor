@@ -228,6 +228,7 @@ class PowerPredictorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return {
             "predictions": predictions,          # 48 hourly dicts
             "power_entity": power_entity,
+            "history_days": history_days,
             "last_updated": dt_util.now().isoformat(),
             "training_samples": len(df),
         }
