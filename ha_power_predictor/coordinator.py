@@ -185,6 +185,7 @@ class PowerPredictorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
 
         # ── Step 6: Build future feature matrix ──────────────────────────────
+        _LOGGER.debug("Building future feature matrix (%d hours)", PREDICTION_HOURS)
         df_future: pd.DataFrame = await self.hass.async_add_executor_job(
             _build_future_df,
             df,
@@ -201,7 +202,7 @@ class PowerPredictorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         future_result = await self.hass.async_add_executor_job(
             predict_iterative,
             df_future[features].values,
-            np.zeros(len(df_future)),   # dummy y — not used, only needed for API compat
+            np.zeros(len(df_future)),
             model,
             features,
             n_power_lags,
@@ -219,10 +220,11 @@ class PowerPredictorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         ]
 
         _LOGGER.info(
-            "Pipeline complete — %d predictions from %s to %s",
+            "Pipeline complete — %d predictions from %s to %s  (trained on %d samples)",
             len(predictions),
             predictions[0]["timestamp"],
             predictions[-1]["timestamp"],
+            len(df),
         )
 
         return {
@@ -383,23 +385,23 @@ def _build_future_df(
 
     df_future = pd.DataFrame(future_rows)
 
-    # Concatenate historical + future stubs so that .shift() correctly seeds
-    # the first future lag values with real historical measurements.
-    shared_cols = ["timestamp", "consumption", "temperature", "year", "month", "day_of_week", "hour"]
-    df_combined = pd.concat(
-        [df_historical[shared_cols], df_future[shared_cols]],
-        ignore_index=True,
-    )
+    # Seed lag columns from the tail of historical data.
+    # We need up to max(n_power_lags, n_temp_lags) rows from the end of history
+    # to correctly seed the initial lag values for the first future rows.
+    # predict_iterative will then overwrite power_lag columns as it steps forward,
+    # propagating its own predictions — so we only need the historical seed to be
+    # correct for the very first prediction step.
+    if n_power_lags > 0:
+        # Last n_power_lags consumption values, most-recent-first
+        hist_power = df_historical["consumption"].iloc[-n_power_lags:].values[::-1]
+        for i in range(1, n_power_lags + 1):
+            seed_val = float(hist_power[i - 1]) if i <= len(hist_power) else float(df_historical["consumption"].mean())
+            df_future[f"power_lag_{i}"] = seed_val
 
-    for i in range(1, n_power_lags + 1):
-        df_combined[f"power_lag_{i}"] = df_combined["consumption"].shift(i)
+    if n_temp_lags > 0:
+        hist_temp = df_historical["temperature"].iloc[-n_temp_lags:].values[::-1]
+        for i in range(1, n_temp_lags + 1):
+            seed_val = float(hist_temp[i - 1]) if i <= len(hist_temp) else float(df_historical["temperature"].mean())
+            df_future[f"temp_lag_{i}"] = seed_val
 
-    for i in range(1, n_temp_lags + 1):
-        df_combined[f"temp_lag_{i}"] = df_combined["temperature"].shift(i)
-
-    # Slice out only the future rows and fill any edge-case NaNs with column means
-    n_hist = len(df_historical)
-    df_out = df_combined.iloc[n_hist:].copy().reset_index(drop=True)
-    df_out = df_out.fillna(df_out.mean(numeric_only=True))
-
-    return df_out
+    return df_future

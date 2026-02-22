@@ -17,6 +17,22 @@ import pandas as pd
 _LOGGER = logging.getLogger(__name__)
 
 
+def _parse_start(start: any) -> pd.Timestamp:
+    """
+    Parse a recorder statistics 'start' value into a UTC-aware Timestamp.
+
+    HA's statistics_during_period returns 'start' as a Unix epoch float
+    (seconds since 1970-01-01 UTC) in recent HA versions. Older versions
+    may return a datetime object directly. Both are handled here.
+    """
+    if isinstance(start, (int, float)):
+        return pd.Timestamp(start, unit="s", tz="UTC")
+    ts = pd.Timestamp(start)
+    if ts.tzinfo is None:
+        ts = ts.tz_localize("UTC")
+    return ts
+
+
 def process_ha_statistics(
     power_stats: list[dict[str, Any]],
     temp_stats: list[dict[str, Any]],
@@ -71,7 +87,7 @@ def process_ha_statistics(
             continue
         try:
             power_records.append({
-                "timestamp": pd.Timestamp(start),
+                "timestamp": _parse_start(start),
                 "consumption": float(mean),
             })
         except (TypeError, ValueError):
@@ -93,7 +109,7 @@ def process_ha_statistics(
             continue
         try:
             temp_records.append({
-                "timestamp": pd.Timestamp(start),
+                "timestamp": _parse_start(start),
                 "temperature": float(mean),
             })
         except (TypeError, ValueError):
