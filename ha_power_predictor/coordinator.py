@@ -32,6 +32,8 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_HISTORY_DAYS,
+    CONF_MAX_POWER,
+    CONF_MIN_POWER,
     CONF_N_POWER_LAGS,
     CONF_N_TEMP_LAGS,
     CONF_OFFPEAK_QUANTILE,
@@ -45,6 +47,8 @@ from .const import (
     CONF_USE_DYNAMIC_QUANTILE,
     CONF_WEATHER_FORECAST_ENTITY,
     DEFAULT_HISTORY_DAYS,
+    DEFAULT_MAX_POWER,
+    DEFAULT_MIN_POWER,
     DEFAULT_N_POWER_LAGS,
     DEFAULT_N_TEMP_LAGS,
     DEFAULT_OFFPEAK_QUANTILE,
@@ -104,7 +108,8 @@ class PowerPredictorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         quantile: float = float(cfg.get(CONF_QUANTILE, DEFAULT_QUANTILE))
         use_dynamic: bool = bool(cfg.get(CONF_USE_DYNAMIC_QUANTILE, DEFAULT_USE_DYNAMIC_QUANTILE))
 
-        dynamic_config: dict | None = None
+        min_power: float = float(cfg.get(CONF_MIN_POWER, DEFAULT_MIN_POWER))
+        max_power: float = float(cfg.get(CONF_MAX_POWER, DEFAULT_MAX_POWER))
         if use_dynamic:
             dynamic_config = {
                 "peak_start": int(cfg.get(CONF_PEAK_START, DEFAULT_PEAK_START)),
@@ -214,7 +219,7 @@ class PowerPredictorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         predictions: list[dict[str, Any]] = [
             {
                 "timestamp": row["timestamp"].isoformat(),
-                "predicted": round(float(max(0.0, raw_preds[i])), 3),
+                "predicted": round(float(min(max_power, max(min_power, raw_preds[i]))), 3),
             }
             for i, (_, row) in enumerate(df_future.iterrows())
         ]

@@ -18,6 +18,8 @@ from homeassistant.helpers import selector
 
 from .const import (
     CONF_HISTORY_DAYS,
+    CONF_MAX_POWER,
+    CONF_MIN_POWER,
     CONF_N_POWER_LAGS,
     CONF_N_TEMP_LAGS,
     CONF_OFFPEAK_QUANTILE,
@@ -31,6 +33,8 @@ from .const import (
     CONF_USE_DYNAMIC_QUANTILE,
     CONF_WEATHER_FORECAST_ENTITY,
     DEFAULT_HISTORY_DAYS,
+    DEFAULT_MAX_POWER,
+    DEFAULT_MIN_POWER,
     DEFAULT_N_POWER_LAGS,
     DEFAULT_N_TEMP_LAGS,
     DEFAULT_OFFPEAK_QUANTILE,
@@ -71,6 +75,18 @@ def _model_schema(defaults: dict) -> vol.Schema:
         return defaults.get(key, fallback)
 
     return vol.Schema({
+        vol.Required(
+            CONF_MIN_POWER,
+            default=_d(CONF_MIN_POWER, DEFAULT_MIN_POWER),
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(min=0.0, max=100.0, step=0.1, mode="box")
+        ),
+        vol.Required(
+            CONF_MAX_POWER,
+            default=_d(CONF_MAX_POWER, DEFAULT_MAX_POWER),
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(min=0.0, max=1000.0, step=0.1, mode="box")
+        ),
         vol.Required(
             CONF_HISTORY_DAYS,
             default=_d(CONF_HISTORY_DAYS, DEFAULT_HISTORY_DAYS),

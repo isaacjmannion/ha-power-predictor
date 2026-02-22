@@ -19,6 +19,8 @@
         "title": "Model Parameters",
         "description": "Configure the prediction model. The defaults work well for most setups.",
         "data": {
+          "min_power": "Minimum Predicted Power (kW)",
+          "max_power": "Maximum Predicted Power (kW)",
           "history_days": "History Days",
           "update_interval_minutes": "Update Interval (minutes)",
           "n_power_lags": "Power Lag Features",
@@ -31,6 +33,8 @@
           "offpeak_quantile": "Off-Peak Quantile"
         },
         "data_description": {
+          "min_power": "Clamp predicted values to at least this value in kW (0 = no minimum beyond zero).",
+          "max_power": "Clamp predicted values to at most this value in kW. Set to your circuit breaker or inverter capacity.",
           "history_days": "How many days of historical data to train on (1–365).",
           "update_interval_minutes": "How often to retrain and refresh predictions. Minimum 15 minutes.",
           "n_power_lags": "Number of previous hourly power readings to include as features (0 = none).",
@@ -54,6 +58,8 @@
         "title": "Model Parameters",
         "description": "Adjust model parameters. Changes take effect immediately after saving.",
         "data": {
+          "min_power": "Minimum Predicted Power (kW)",
+          "max_power": "Maximum Predicted Power (kW)",
           "history_days": "History Days",
           "update_interval_minutes": "Update Interval (minutes)",
           "n_power_lags": "Power Lag Features",
