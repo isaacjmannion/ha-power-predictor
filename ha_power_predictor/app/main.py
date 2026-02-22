@@ -560,5 +560,216 @@ def get_results():
     return jsonify(app_state['prediction_results'])
 
 
+def save_csvs(df_historical, predictions_list, config):
+    """
+    Save prediction and historical CSVs to /share directory.
+    Saves both latest and timestamped versions.
+    
+    Args:
+        df_historical: DataFrame with historical power data
+        predictions_list: List of prediction dicts with timestamp and predicted values
+        config: Configuration dict
+    
+    Returns:
+        Dict with file paths
+    """
+    import os
+    from datetime import datetime
+    
+    # Create output directory
+    output_dir = '/share/ha_power_predictor'
+    os.makedirs(output_dir, exist_ok=True)
+    
+    timestamp_str = datetime.now().strftime('%Y-%m-%d_%H-%M')
+    
+    # === Save Predictions CSV ===
+    predictions_latest = os.path.join(output_dir, 'predictions_latest.csv')
+    predictions_timestamped = os.path.join(output_dir, f'predictions_{timestamp_str}.csv')
+    
+    with open(predictions_latest, 'w') as f:
+        f.write('timestamp,predicted_kw\n')
+        for pred in predictions_list:
+            f.write(f"{pred['timestamp']},{pred['predicted']}\n")
+    
+    # Copy to timestamped version
+    import shutil
+    shutil.copy(predictions_latest, predictions_timestamped)
+    
+    # === Save Historical 48h CSV ===
+    # Get last 48 hours of data
+    df_48h = df_historical.tail(48).copy()
+    
+    historical_latest = os.path.join(output_dir, 'historical_48h_latest.csv')
+    historical_timestamped = os.path.join(output_dir, f'historical_48h_{timestamp_str}.csv')
+    
+    with open(historical_latest, 'w') as f:
+        f.write('timestamp,actual_kw\n')
+        for _, row in df_48h.iterrows():
+            f.write(f"{row['timestamp'].isoformat()},{row['consumption']}\n")
+    
+    shutil.copy(historical_latest, historical_timestamped)
+    
+    return {
+        'predictions_latest': predictions_latest,
+        'predictions_timestamped': predictions_timestamped,
+        'historical_latest': historical_latest,
+        'historical_timestamped': historical_timestamped
+    }
+
+
+@app.route('/api/run-prediction-pipeline', methods=['POST'])
+def run_prediction_pipeline():
+    """
+    Full automated pipeline: fetch data → train → save CSVs → publish sensors.
+    Designed to be called by HA automation every hour.
+    """
+    try:
+        config = get_config_from_env()
+        use_stats = config.get('use_hourly_statistics', False)
+        
+        ha_client = HomeAssistantClient(
+            base_url=os.getenv('HA_URL', 'http://supervisor/core'),
+            token=os.getenv('SUPERVISOR_TOKEN')
+        )
+        
+        app.logger.info("=== PREDICTION PIPELINE START ===")
+        
+        # --- Step 1: Fetch Power Data ---
+        app.logger.info("Step 1/4: Fetching power data...")
+        end_time = datetime.now()
+        start_time = end_time - timedelta(days=config['history_days'])
+        
+        if use_stats:
+            power_data = ha_client.get_statistics(config['power_entity'], start_time, end_time, 'hour')
+        else:
+            power_data = ha_client.get_history(config['power_entity'], start_time, end_time)
+        
+        if not power_data:
+            return jsonify({'success': False, 'error': 'No power data found'}), 400
+        
+        app_state['power_data'] = power_data
+        
+        # --- Step 2: Fetch Temperature Data ---
+        app.logger.info("Step 2/4: Fetching temperature data...")
+        if use_stats:
+            temp_data = ha_client.get_statistics(config['temperature_entity'], start_time, end_time, 'hour')
+        else:
+            temp_data = ha_client.get_history(config['temperature_entity'], start_time, end_time)
+        
+        if not temp_data:
+            return jsonify({'success': False, 'error': 'No temperature data found'}), 400
+        
+        app_state['weather_history'] = temp_data
+        
+        # --- Step 3: Fetch Weather Forecast ---
+        app.logger.info("Step 3/4: Fetching weather forecast...")
+        forecast_data = ha_client.get_weather_forecast(config['weather_forecast_entity'], 'hourly')
+        app_state['weather_forecast'] = forecast_data or []
+        
+        # --- Step 4: Train Model & Generate Predictions ---
+        app.logger.info("Step 4/4: Training model and generating predictions...")
+        
+        # Process historical data
+        if use_stats:
+            df = process_ha_statistics(power_data, temp_data, timezone=config['timezone'])
+        else:
+            df = process_ha_data(power_data, temp_data, bin_size_minutes=config['bin_size_minutes'], timezone=config['timezone'])
+        
+        if len(df) < 100:
+            return jsonify({'success': False, 'error': f'Insufficient data: only {len(df)} records'}), 400
+        
+        df = add_lagged_features(df, n_power_lags=config['n_power_lags'], n_temp_lags=config['n_temp_lags'])
+        
+        features = get_default_features()
+        for i in range(1, config['n_power_lags'] + 1):
+            features.append(f'power_lag_{i}')
+        for i in range(1, config['n_temp_lags'] + 1):
+            features.append(f'temp_lag_{i}')
+        
+        # Train/test split for metrics
+        test_size = int(len(df) * (1 - config['train_percentage'] / 100))
+        df_test = df.iloc[:test_size].copy()
+        df_train = df.iloc[test_size:].copy()
+        
+        dynamic_config = None
+        if config['use_dynamic_quantile']:
+            dynamic_config = {
+                'peak_start': config['peak_start'],
+                'peak_end': config['peak_end'],
+                'peak_quantile': config['peak_quantile'],
+                'offpeak_quantile': config['offpeak_quantile']
+            }
+        
+        eval_model = QuantileRegressionModel(quantile=config['quantile'], dynamic_config=dynamic_config)
+        eval_model.train(df_train[features].values, df_train['consumption'].values, df_train['hour'].values)
+        
+        eval_result = predict_iterative(
+            df_test[features].values, df_test['consumption'].values,
+            eval_model, features, config['n_power_lags'], df_test['hour'].values
+        )
+        metrics = eval_model.evaluate(df_test['consumption'].values, eval_result['predictions'])
+        coverage = eval_model.calculate_coverage(df_test['consumption'].values, eval_result['predictions'])
+        
+        # Retrain on all data
+        final_model = QuantileRegressionModel(quantile=config['quantile'], dynamic_config=dynamic_config)
+        final_model.train(df[features].values, df['consumption'].values, df['hour'].values)
+        
+        # Build future predictions
+        df_future = _build_future_features(config, df, features, forecast_data)
+        X_future = df_future[features].values
+        hours_future = df_future['hour'].values
+        dummy_y = np.zeros(len(X_future))
+        future_result = predict_iterative(X_future, dummy_y, final_model, features, config['n_power_lags'], hours_future)
+        y_future = future_result['predictions']
+        
+        predictions_list = []
+        for i, row in df_future.iterrows():
+            predictions_list.append({
+                'timestamp': row['timestamp'].isoformat(),
+                'predicted': round(float(max(0, y_future[i])), 3)
+            })
+        
+        # --- Save CSVs ---
+        app.logger.info("Saving CSVs...")
+        csv_files = save_csvs(df, predictions_list, config)
+        
+        # --- Publish to Home Assistant ---
+        app.logger.info("Publishing sensors to Home Assistant...")
+        ha_client.create_prediction_sensors(predictions_list, config['power_entity'])
+        
+        # --- Store results ---
+        app_state['prediction_results'] = {
+            'predictions': predictions_list,
+            'metrics': {
+                'r2': float(metrics['r2']),
+                'mae': float(metrics['mae']),
+                'rmse': float(metrics['rmse']),
+                'coverage': float(coverage)
+            }
+        }
+        
+        app.logger.info("=== PIPELINE COMPLETE ===")
+        
+        return jsonify({
+            'success': True,
+            'timestamp': datetime.now().isoformat(),
+            'metrics': {
+                'r2': float(metrics['r2']),
+                'mae': float(metrics['mae']),
+                'rmse': float(metrics['rmse']),
+                'coverage': float(coverage)
+            },
+            'files': csv_files,
+            'record_counts': {
+                'predictions': len(predictions_list),
+                'historical_48h': min(48, len(df))
+            }
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Pipeline error: {traceback.format_exc()}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8099, debug=False, use_reloader=False)
