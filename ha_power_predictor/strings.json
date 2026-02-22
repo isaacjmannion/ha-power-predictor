@@ -31,7 +31,7 @@
           "offpeak_quantile": "Off-Peak Quantile"
         },
         "data_description": {
-          "history_days": "How many days of historical data to train on (7–365).",
+          "history_days": "How many days of historical data to train on (1–365).",
           "update_interval_minutes": "How often to retrain and refresh predictions. Minimum 15 minutes.",
           "n_power_lags": "Number of previous hourly power readings to include as features (0 = none).",
           "n_temp_lags": "Number of previous hourly temperature readings to include as features (0 = none).",

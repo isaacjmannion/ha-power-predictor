@@ -75,7 +75,7 @@ def _model_schema(defaults: dict) -> vol.Schema:
             CONF_HISTORY_DAYS,
             default=_d(CONF_HISTORY_DAYS, DEFAULT_HISTORY_DAYS),
         ): selector.NumberSelector(
-            selector.NumberSelectorConfig(min=7, max=365, step=1, mode="box")
+            selector.NumberSelectorConfig(min=1, max=365, step=1, mode="box")
         ),
         vol.Required(
             CONF_UPDATE_INTERVAL_MINUTES,
