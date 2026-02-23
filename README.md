@@ -215,16 +215,6 @@ series:
 - **Issues**: [GitHub Issues](https://github.com/isaacjmannion/ha-power-predictor/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/isaacjmannion/ha-power-predictor/discussions)
 
-## Contributing
-
-Contributions are welcome!
-
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feature/my-feature`
-3. Commit your changes: `git commit -m 'Add my feature'`
-4. Push to the branch: `git push origin feature/my-feature`
-5. Open a Pull Request
-
 ## Changelog
 
 ### 0.1.0 — Initial Release
