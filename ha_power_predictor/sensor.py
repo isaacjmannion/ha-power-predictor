@@ -39,6 +39,7 @@ async def async_setup_entry(
     async_add_entities([
         PowerPredictionSensor(coordinator, entry, window_hours=24),
         PowerPredictionSensor(coordinator, entry, window_hours=48),
+        FittedModelSensor(coordinator, entry),
     ])
 
 
@@ -126,4 +127,85 @@ class PowerPredictionSensor(CoordinatorEntity[PowerPredictorCoordinator], Sensor
             "history_days": data.get("history_days"),
             "last_forecast_update": last_updated_local,
             "forecast": forecast,
+        }
+
+
+class FittedModelSensor(CoordinatorEntity[PowerPredictorCoordinator], SensorEntity):
+    """
+    Sensor exposing the model's in-sample fitted values over the training period.
+
+    State
+    -----
+    Coverage percentage — the fraction of actual hourly values that fell at or
+    below the model's prediction. For a well-calibrated q=0.75 model this
+    should be close to 75%.
+
+    Attributes
+    ----------
+    source_entity        Entity ID of the power consumption sensor used for training.
+    history_days         Number of days of history the model trained on.
+    last_forecast_update Friendly local-time string of when the pipeline last ran.
+    fitted               List of {time, value} dicts covering the previous 48 hours
+                         of training data — suitable for overlaying the model fit on
+                         a Lovelace chart alongside actual historical consumption.
+    training_samples     Number of hourly records used for training.
+    """
+
+    _attr_device_class = SensorDeviceClass.POWER
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = "%"
+    _attr_icon = "mdi:chart-bell-curve-cumulative"
+    _attr_has_entity_name = True
+
+    def __init__(
+        self,
+        coordinator: PowerPredictorCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{entry.entry_id}_fitted_model"
+        self._attr_name = "Power Prediction Fitted Model"
+
+    @property
+    def native_value(self) -> float | None:
+        """State — in-sample coverage percentage."""
+        if not self.coordinator.data:
+            return None
+        coverage = self.coordinator.data.get("fitted_coverage")
+        return round(coverage, 1) if coverage is not None else None
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        """Attributes — full fitted vs actual series in local time."""
+        data = self.coordinator.data
+        if not data:
+            return {}
+
+        last_updated_raw = data.get("last_updated", "")
+        try:
+            last_updated_local = dt_util.as_local(
+                dt_util.parse_datetime(last_updated_raw)
+            ).strftime("%B %-d, %Y at %H:%M:%S")
+        except (TypeError, ValueError, AttributeError):
+            last_updated_local = last_updated_raw
+
+        # Convert UTC timestamps to local time with offset
+        fitted_local = []
+        for entry in data.get("fitted", []):
+            try:
+                utc_dt = dt_util.parse_datetime(entry["timestamp"])
+                local_dt = dt_util.as_local(utc_dt)
+                fitted_local.append({
+                    "time": local_dt.isoformat(),
+                    "value": entry["value"],
+                })
+            except (TypeError, ValueError, AttributeError):
+                continue
+
+        return {
+            "source_entity": data.get("power_entity"),
+            "history_days": data.get("history_days"),
+            "last_forecast_update": last_updated_local,
+            "fitted": fitted_local,
+            "training_samples": data.get("training_samples"),
         }

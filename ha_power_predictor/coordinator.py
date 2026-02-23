@@ -189,6 +189,31 @@ class PowerPredictorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             df["hour"].values,
         )
 
+        # ── Step 5b: In-sample fitted values ────────────────────────────────
+        # Run predict on the training data so the user can overlay the model
+        # against their actual historical consumption in Lovelace charts.
+        fitted_raw: np.ndarray = await self.hass.async_add_executor_job(
+            model.predict,
+            df[features].values,
+            df["hour"].values,
+        )
+        fitted_coverage: float = float(
+            np.mean(df["consumption"].values <= fitted_raw) * 100
+        )
+        # Limit to the most recent 48 hours to keep attribute size manageable
+        df_fitted = df.iloc[-48:]
+        fitted_raw_48 = fitted_raw[-48:]
+        fitted: list[dict[str, Any]] = [
+            {
+                "timestamp": row["timestamp"].isoformat(),
+                "value": round(float(min(max_power, max(min_power, fitted_raw_48[i]))), 3),
+            }
+            for i, (_, row) in enumerate(df_fitted.iterrows())
+        ]
+        _LOGGER.debug(
+            "In-sample fit: %d records, coverage %.1f%%", len(fitted), fitted_coverage
+        )
+
         # ── Step 6: Build future feature matrix ──────────────────────────────
         _LOGGER.debug("Building future feature matrix (%d hours)", PREDICTION_HOURS)
         df_future: pd.DataFrame = await self.hass.async_add_executor_job(
@@ -233,7 +258,9 @@ class PowerPredictorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
 
         return {
-            "predictions": predictions,          # 48 hourly dicts
+            "predictions": predictions,
+            "fitted": fitted,
+            "fitted_coverage": fitted_coverage,
             "power_entity": power_entity,
             "history_days": history_days,
             "last_updated": dt_util.now().isoformat(),
