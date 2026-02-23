@@ -417,23 +417,37 @@ def _build_future_df(
 
     df_future = pd.DataFrame(future_rows)
 
-    # Seed lag columns from the tail of historical data.
-    # We need up to max(n_power_lags, n_temp_lags) rows from the end of history
-    # to correctly seed the initial lag values for the first future rows.
-    # predict_iterative will then overwrite power_lag columns as it steps forward,
-    # propagating its own predictions — so we only need the historical seed to be
-    # correct for the very first prediction step.
+    # Seed lag columns by concatenating the historical tail with the future rows
+    # and computing .shift() on the combined series.  This ensures that:
+    #   - Row 0 of future inherits its lag values from real historical data.
+    #   - Row i inherits lag values from the correct preceding future row(s),
+    #     so temperature lags track the forecast temperature as it evolves hour
+    #     by hour rather than being frozen at a single stale value.
+    #
+    # For power lags, predict_iterative will overwrite these values step-by-step
+    # with its own predictions as it walks forward through the forecast window,
+    # but the correct historical seed here ensures the very first step is sound.
+    # For temperature lags, the values computed here are used as-is — forecast
+    # temperatures are already present in df_future["temperature"], so shifting
+    # over the combined series gives the correct lagged temperature for every
+    # future row without any further updates needed at inference time.
+
+    max_lag = max(n_power_lags, n_temp_lags, 1)
+
     if n_power_lags > 0:
-        # Last n_power_lags consumption values, most-recent-first
-        hist_power = df_historical["consumption"].iloc[-n_power_lags:].values[::-1]
+        hist_power_tail = df_historical["consumption"].iloc[-max_lag:].reset_index(drop=True)
+        future_power = df_future["consumption"].reset_index(drop=True)
+        combined_power = pd.concat([hist_power_tail, future_power], ignore_index=True)
         for i in range(1, n_power_lags + 1):
-            seed_val = float(hist_power[i - 1]) if i <= len(hist_power) else float(df_historical["consumption"].mean())
-            df_future[f"power_lag_{i}"] = seed_val
+            lagged = combined_power.shift(i)
+            df_future[f"power_lag_{i}"] = lagged.iloc[max_lag:].values
 
     if n_temp_lags > 0:
-        hist_temp = df_historical["temperature"].iloc[-n_temp_lags:].values[::-1]
+        hist_temp_tail = df_historical["temperature"].iloc[-max_lag:].reset_index(drop=True)
+        future_temp = df_future["temperature"].reset_index(drop=True)
+        combined_temp = pd.concat([hist_temp_tail, future_temp], ignore_index=True)
         for i in range(1, n_temp_lags + 1):
-            seed_val = float(hist_temp[i - 1]) if i <= len(hist_temp) else float(df_historical["temperature"].mean())
-            df_future[f"temp_lag_{i}"] = seed_val
+            lagged = combined_temp.shift(i)
+            df_future[f"temp_lag_{i}"] = lagged.iloc[max_lag:].values
 
     return df_future
