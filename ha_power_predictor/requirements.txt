@@ -1,7 +1,0 @@
-Flask==3.0.0
-pandas==2.1.4
-numpy==1.26.2
-scikit-learn==1.4.0
-requests==2.31.0
-gunicorn==21.2.0
-pytz==2023.3

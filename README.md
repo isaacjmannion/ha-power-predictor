@@ -1,137 +1,229 @@
-# Home Assistant Power Predictor Add-on Repository
+# HA Power Predictor
 
-[![GitHub Release](https://img.shields.io/github/release/isaacjmannion/ha-power-predictor.svg?style=flat-square)](https://github.com/isaacjmannion/ha-power-predictor/releases)
+[![GitHub Release](https://img.shields.io/github/v/release/isaacjmannion/ha-power-predictor?style=flat-square)](https://github.com/isaacjmannion/ha-power-predictor/releases)
+[![HACS Default](https://img.shields.io/badge/HACS-Default-41BDB3.svg?style=flat-square)](https://github.com/hacs/integration)
 [![License](https://img.shields.io/github/license/isaacjmannion/ha-power-predictor.svg?style=flat-square)](LICENSE)
 
-Forecast future power consumption directly within Home Assistant, using your historical usage and weather data.
+Forecast future power consumption directly within Home Assistant using your historical usage and weather data.
+
+---
 
 ## About
 
-This repository contains the **HA Power Predictor** add-on for Home Assistant. It uses quantile regression to forecast future power consumption based on historical power usage, observed temperatures, and weather forecast data, with support for dynamic peak/off-peak modeling.
+**HA Power Predictor** is a custom Home Assistant integration that uses quantile regression to forecast future power consumption based on historical power usage, observed temperatures, and weather forecast data, with support for dynamic peak/off-peak modelling.
 
 ### Features
 
-- 📊 **Configurable Predictions**: Quantile regression with adjustable percentiles to suit conservative or typical forecasts
-- ⏰ **Peak/Off-Peak Modeling**: Apply different prediction strategies depending on the time of day
-- 🖥️ **Web Interface**: Built-in UI with charts and model metrics
-- 🔌 **Home Assistant Integration**: Prediction results are automatically published as HA sensors
-- 📈 **Multiple Time Windows**: Predictions for 1h, 6h, 12h, 24h, and 48h ahead
-- 🔄 **Multi-Step Forecasting**: Each step uses prior predicted values to build realistic forward projections
-- 🏗️ **Multi-Architecture**: Supports all HA platforms (amd64, aarch64, armhf, etc.)
+- 📊 **Configurable Predictions** — Quantile regression with adjustable percentiles for conservative or typical forecasts
+- ⏰ **Peak/Off-Peak Modelling** — Apply different prediction strategies depending on the time of day
+- 🔌 **Home Assistant Integration** — Prediction results published automatically as HA sensors
+- 📈 **Multiple Time Windows** — Forecast sensors for 24 h and 48 h ahead
+- 🔄 **Fitted Model Sensor** — In-sample fitted values for charting model accuracy against historical data
+- 🔁 **Configurable Update Interval** — Retrain and refresh on your own schedule
+
+---
 
 ## Installation
 
-### Via Add-on Store
+### Via HACS (Recommended)
 
-1. Navigate to **Settings → Add-ons → Add-on Store** in Home Assistant
-2. Click the menu (⋮) in the top right, then **Repositories**
-3. Add this repository: `https://github.com/isaacjmannion/ha-power-predictor`
-4. Find **HA Power Predictor** in the add-on store
-5. Click **Install**
+1. Open **HACS** in your Home Assistant sidebar
+2. Go to **Integrations**
+3. Click the **⋮** menu (top right) and select **Custom repositories**
+4. Enter the repository URL: `https://github.com/isaacjmannion/ha-power-predictor`
+5. Set the category to **Integration** and click **Add**
+6. Search for **HA Power Predictor** in HACS and click **Download**
+7. Restart Home Assistant
+8. Go to **Settings → Devices & Services → Add Integration** and search for **HA Power Predictor**
 
 ### Manual Installation
 
-1. Navigate to the `/addons` folder of your Home Assistant instance
-2. Clone this repository: `git clone https://github.com/isaacjmannion/ha-power-predictor`
+1. Download the latest release from the [Releases page](https://github.com/isaacjmannion/ha-power-predictor/releases)
+2. Extract and copy the `ha_power_predictor` folder into your `config/custom_components/` directory
 3. Restart Home Assistant
-4. Navigate to **Settings → Add-ons**
-5. Find and install **HA Power Predictor**
+4. Go to **Settings → Devices & Services → Add Integration** and search for **HA Power Predictor**
 
-## Quick Start
+---
 
-1. **Configure the add-on** with your three data sources:
-   ```yaml
-   power_entity: "sensor.your_power_sensor"
-   temperature_entity: "sensor.your_historical_temperature_sensor"
-   forecast_entity: "weather.your_forecast_entity"
-   history_days: 30
-   ```
+## Setup
 
-2. **Start the add-on** and click **Open Web UI**
+The integration is configured entirely via the UI — no YAML required.
 
-3. **Work through the 4 setup steps** in the web interface to configure and train the model
+### Step 1 — Entity Configuration
 
-4. **View your predictions** in the web UI or via the published Home Assistant sensors
+Provide three entities during initial setup:
 
-## Published Sensors
+| Field | Description |
+|-------|-------------|
+| **Power Consumption Entity** | Your total power sensor (e.g. `sensor.sigen_plant_consumed_power`). Must have long-term statistics enabled. |
+| **Temperature Entity** | An outdoor temperature sensor (e.g. `sensor.outdoor_temperature`). Must have long-term statistics enabled. |
+| **Weather Forecast Entity** | A weather entity providing an hourly forecast (e.g. `weather.home`). |
 
-After running a prediction the following sensors are created in Home Assistant:
+### Step 2 — Model Parameters
 
-| Sensor | Description |
-|--------|-------------|
-| `sensor.power_prediction_next_1h` | Average predicted load for the next hour |
-| `sensor.power_prediction_next_6h` | Average predicted load for the next 6 hours |
-| `sensor.power_prediction_next_12h` | Average predicted load for the next 12 hours |
-| `sensor.power_prediction_next_24h` | Average predicted load for the next 24 hours |
-| `sensor.power_prediction_next_48h` | Average predicted load for the next 48 hours |
-| `sensor.power_prediction_full` | Complete prediction dataset with all time-point values |
-
-Each sensor includes attributes with individual time-point predictions that can be used in dashboards or automations.
-
-## Configuration
-
-See [ha_power_predictor/SETUP_GUIDE.md](ha_power_predictor/SETUP_GUIDE.md) for detailed configuration options.
-
-Basic configuration:
+Tune the model behaviour via **Settings → Devices & Services → HA Power Predictor → Configure**:
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `power_entity` | Your power consumption sensor | Required |
-| `temperature_entity` | Historical temperature sensor | Required |
-| `forecast_entity` | Weather forecast entity | Required |
-| `history_days` | Days of history to use for training | 30 |
-| `quantile` | Prediction percentile | 0.75 |
-| `use_dynamic_quantile` | Enable peak/off-peak modes | true |
+| `History Days` | Days of historical data to train on | 30 |
+| `Update Interval (minutes)` | How often to retrain and refresh | 60 |
+| `Min Predicted Power (kW)` | Clamp predictions to at least this value | 0.0 |
+| `Max Predicted Power (kW)` | Clamp predictions to at most this value | 20.0 |
+| `Power Lag Features` | Previous hourly power readings used as model features | 5 |
+| `Temperature Lag Features` | Previous hourly temperature readings used as model features | 5 |
+| `Use Dynamic Quantile` | Different quantile for peak vs off-peak hours | true |
+| `Quantile` | Prediction percentile when dynamic quantile is off (0.5 = median) | 0.75 |
+| `Peak Start Hour` | Hour the peak period begins (0–23, inclusive) | 9 |
+| `Peak End Hour` | Hour the peak period ends (0–23, inclusive) | 22 |
+| `Peak Quantile` | Quantile applied during peak hours | 0.75 |
+| `Off-Peak Quantile` | Quantile applied during off-peak hours | 0.50 |
 
-## Documentation
+---
 
-- **[README.md](ha_power_predictor/README.md)** - Basic add-on information
-- **[DOCS.md](ha_power_predictor/DOCS.md)** - Comprehensive documentation
-- **[SETUP_GUIDE.md](ha_power_predictor/SETUP_GUIDE.md)** - Complete setup guide with examples
-- **[MIGRATION_SUMMARY.md](MIGRATION_SUMMARY.md)** - Migration guide from desktop version
+## Published Sensors
+
+After the first successful prediction run, three sensors are created:
+
+| Sensor | State | Description |
+|--------|-------|-------------|
+| `sensor.power_prediction_24h` | kW | Predicted load for the next hour; includes a `forecast` attribute with hourly values for the next 24 hours |
+| `sensor.power_prediction_48h` | kW | Predicted load for the next hour; includes a `forecast` attribute with hourly values for the next 48 hours |
+| `sensor.power_prediction_fitted_model` | % | In-sample coverage — the fraction of historical hourly values that fell at or below the model's prediction (e.g. ~75% for a well-calibrated `q=0.75` model); includes a `fitted` attribute with hourly fitted values for the previous 48 hours |
+
+### Sensor Attribute Format
+
+All three sensors share these common attributes:
+
+```yaml
+source_entity: sensor.sigen_plant_consumed_power
+history_days: 15
+last_forecast_update: "February 23, 2026 at 11:21:06"
+```
+
+`sensor.power_prediction_24h` / `sensor.power_prediction_48h` also expose:
+
+```yaml
+forecast:
+  - time: '2026-02-23T12:00:00+11:00'
+    value: 2.98
+  - time: '2026-02-23T13:00:00+11:00'
+    value: 3.37
+  # ... one entry per hour for the window
+```
+
+`sensor.power_prediction_fitted_model` also exposes:
+
+```yaml
+fitted:
+  - time: '2026-02-21T11:00:00+11:00'
+    value: 1.39
+  - time: '2026-02-21T12:00:00+11:00'
+    value: 1.41
+  # ... one entry per hour for the past 48 hours
+training_samples: 360
+```
+
+---
+
+## Dashboard Example
+
+Here is an ApexCharts card that plots 2 days of historical consumption alongside the fitted model and 48 h forecast:
+
+```yaml
+type: custom:apexcharts-card
+graph_span: 96h
+span:
+  end: hour
+  offset: +48h
+header:
+  show: true
+  title: Power Consumption & Prediction
+  show_states: true
+  colorize_states: true
+now:
+  show: true
+  label: Now
+  color: '#ff4444'
+apex_config:
+  chart:
+    height: 400
+  yaxis:
+    title:
+      text: Power (kW)
+    decimalsInFloat: 2
+series:
+  - entity: sensor.sigen_plant_consumed_power
+    name: Actual Consumption
+    type: area
+    stroke_width: 2
+    color: '#2196F3'
+    extend_to: false
+    fill_raw: last
+    group_by:
+      func: avg
+      duration: 1h
+  - entity: sensor.power_prediction_fitted_model
+    name: Fitted Model
+    type: line
+    color: '#ff9800'
+    curve: smooth
+    stroke_width: 2
+    data_generator: |
+      const now = Date.now();
+      const fitted = entity.attributes.fitted || [];
+      return fitted
+        .filter(item => item && item.time && item.value !== undefined
+                        && new Date(item.time).getTime() <= now)
+        .map(item => [new Date(item.time).getTime(), parseFloat(item.value)]);
+  - entity: sensor.power_prediction_48h
+    name: 48 h Forecast
+    type: line
+    color: '#4caf50'
+    curve: smooth
+    stroke_width: 2
+    data_generator: |
+      const forecast = entity.attributes.forecast || [];
+      return forecast
+        .filter(item => item && item.time && item.value !== undefined)
+        .map(item => [new Date(item.time).getTime(), parseFloat(item.value)]);
+```
+
+> Requires [ApexCharts Card](https://github.com/RomRider/apexcharts-card) installed via HACS.
+
+---
+
+## Requirements
+
+- Home Assistant **2024.1** or newer
+- The power and temperature entities must have **long-term statistics** enabled (recorder integration, statistics enabled for the entity)
+- A weather entity providing an **hourly forecast**
+
+---
 
 ## Screenshots
 
-### Web UI
-![Web UI](https://via.placeholder.com/800x500/667eea/ffffff?text=Web+UI+Screenshot)
+### Integration Config Flow
+![Config Flow](images/screenshot-config.png)
+
+### Dashboard Chart
+![Dashboard](images/screenshot-dashboard.png)
+
+---
 
 ## Support
 
 - **Issues**: [GitHub Issues](https://github.com/isaacjmannion/ha-power-predictor/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/isaacjmannion/ha-power-predictor/discussions)
-- **Community**: [Home Assistant Forum Thread](#)
 
 ## Changelog
 
-See [CHANGELOG.md](ha_power_predictor/CHANGELOG.md) for version history.
+### 0.1.0 — Initial Release
+- Quantile regression model for power consumption forecasting
+- Dynamic peak/off-peak quantile support
+- `sensor.power_prediction_24h`, `sensor.power_prediction_48h`, and `sensor.power_prediction_fitted_model` sensors
+- Fully UI-configurable via config flow
+- Button entity to manually trigger a prediction refresh
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Repository Contents
-
-```
-ha-power-predictor/
-├── ha_power_predictor/          # Main add-on directory
-│   ├── config.yaml           # Add-on configuration
-│   ├── Dockerfile            # Container definition
-│   ├── run.sh               # Startup script
-│   ├── requirements.txt     # Python dependencies
-│   ├── README.md            # User documentation
-│   ├── DOCS.md              # Detailed documentation
-│   ├── SETUP_GUIDE.md       # Complete setup guide
-│   ├── CHANGELOG.md         # Version history
-│   ├── build.yaml           # Multi-arch build config
-│   └── app/                 # Python application
-│       ├── main.py          # Flask web server
-│       ├── ha_client.py     # HA API client
-│       ├── data_processing.py
-│       ├── models.py
-│       ├── config.py
-│       └── templates/
-│           └── index.html   # Web UI
-├── repository.yaml           # Repository metadata
-├── MIGRATION_SUMMARY.md      # Migration guide
-└── README.md                # This file
-```
+MIT License — see [LICENSE](LICENSE) for details.
