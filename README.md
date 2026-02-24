@@ -55,8 +55,8 @@ Provide three entities during initial setup:
 
 | Field | Description |
 |-------|-------------|
-| **Power Consumption Entity** | Your total power sensor (e.g. `sensor.sigen_plant_consumed_power`). Must have long-term statistics enabled. |
-| **Temperature Entity** | An outdoor temperature sensor (e.g. `sensor.outdoor_temperature`). Must have long-term statistics enabled. |
+| **Power Consumption Entity** | Your total power sensor (e.g. `sensor.sigen_plant_consumed_power`). Long-term statistics are helpful. |
+| **Temperature Entity** | An outdoor temperature sensor (e.g. `sensor.outdoor_temperature`). Long-term statistics are helpful. |
 | **Weather Forecast Entity** | A weather entity providing an hourly forecast (e.g. `weather.home`). |
 
 ### Step 2 — Model Parameters
