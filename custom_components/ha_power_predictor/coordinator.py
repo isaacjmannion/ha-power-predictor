@@ -365,9 +365,12 @@ def _build_future_df(
         try:
             dt = pd.to_datetime(fc["datetime"])
             if dt.tzinfo is None:
-                dt = dt.tz_localize("UTC") if tz is None else dt.tz_localize(tz)
-            else:
-                dt = dt.tz_convert(tz)
+                # Naive datetimes are assumed to be in HA's local timezone (not UTC)
+                # This handles integrations like BoM that provide timezone-naive forecasts
+                ha_tz = dt_util.get_default_time_zone()
+                dt = dt.tz_localize(ha_tz)
+            # Convert to the working timezone (derived from historical data)
+            dt = dt.tz_convert(tz) if tz else dt
             dt = dt.replace(minute=0, second=0, microsecond=0)
             forecast_lookup[dt] = float(fc["temperature"])
         except (KeyError, ValueError, TypeError, AttributeError):
