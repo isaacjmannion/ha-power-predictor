@@ -10,8 +10,6 @@ CONF_TEMPERATURE_ENTITY = "temperature_entity"
 CONF_WEATHER_FORECAST_ENTITY = "weather_forecast_entity"
 CONF_N_POWER_LAGS = "n_power_lags"
 CONF_N_TEMP_LAGS = "n_temp_lags"
-CONF_QUANTILE = "quantile"
-CONF_USE_DYNAMIC_QUANTILE = "use_dynamic_quantile"
 CONF_PEAK_START = "peak_start"
 CONF_PEAK_END = "peak_end"
 CONF_PEAK_QUANTILE = "peak_quantile"
@@ -24,8 +22,6 @@ CONF_MAX_POWER = "max_power"
 # Defaults
 DEFAULT_N_POWER_LAGS = 5
 DEFAULT_N_TEMP_LAGS = 5
-DEFAULT_QUANTILE = 0.75
-DEFAULT_USE_DYNAMIC_QUANTILE = True
 DEFAULT_PEAK_START = 9
 DEFAULT_PEAK_END = 22
 DEFAULT_PEAK_QUANTILE = 0.75
