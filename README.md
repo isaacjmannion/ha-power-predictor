@@ -1,5 +1,4 @@
 ![HA Power Predictor Banner](images/banner.png)
-
 # HA Power Predictor
 
 [![GitHub Release](https://img.shields.io/github/v/release/isaacjmannion/ha-power-predictor?style=flat-square)](https://github.com/isaacjmannion/ha-power-predictor/releases)
