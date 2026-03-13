@@ -5,6 +5,7 @@ DOMAIN = "ha_power_predictor"
 PLATFORMS = ["sensor", "button"]
 
 # Config entry keys
+CONF_INTEGRATION_NAME = "integration_name"
 CONF_POWER_ENTITY = "power_entity"
 CONF_TEMPERATURE_ENTITY = "temperature_entity"
 CONF_WEATHER_FORECAST_ENTITY = "weather_forecast_entity"
@@ -20,6 +21,7 @@ CONF_MIN_POWER = "min_power"
 CONF_MAX_POWER = "max_power"
 
 # Defaults
+DEFAULT_INTEGRATION_NAME = "Power Predictor"
 DEFAULT_N_POWER_LAGS = 5
 DEFAULT_N_TEMP_LAGS = 5
 DEFAULT_PEAK_START = 9

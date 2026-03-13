@@ -5,11 +5,13 @@
         "title": "Entity Configuration",
         "description": "Select the Home Assistant entities to use for power prediction. All three entities must have long-term statistics enabled in the recorder.",
         "data": {
+          "integration_name": "Integration Name",
           "power_entity": "Power Consumption Entity",
           "temperature_entity": "Temperature Entity",
           "weather_forecast_entity": "Weather Forecast Entity"
         },
         "data_description": {
+          "integration_name": "Custom name for this predictor instance (e.g. 'House', 'Pool', 'EV Charger'). Used to distinguish multiple predictors in the UI. Defaults to 'Power Predictor' if left empty.",
           "power_entity": "The sensor tracking your total power consumption (e.g. sensor.power_consumption). Must have long-term statistics.",
           "temperature_entity": "An outdoor temperature sensor (e.g. sensor.outdoor_temperature). Must have long-term statistics.",
           "weather_forecast_entity": "A weather entity that provides an hourly forecast (e.g. weather.home)."
