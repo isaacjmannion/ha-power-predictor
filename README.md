@@ -222,10 +222,14 @@ series:
 
 ## Changelog
 
-### 0.2.0 — Remove dynamic quantile toggle
+### 0.2.0 — Bug fixes
 - Dynamic peak/off-peak quantile is now always active (toggle removed)
 - Peak and off-peak quantiles remain fully configurable
 - Fixed `NameError` crash when dynamic quantile toggle was disabled
+- Fixed timezone-naive forecast handling for BoM and similar integrations
+- Added customizable integration name to support multiple predictor instances
+- Fixed ApexCharts fitted model line extending past "Now" marker
+- Added banner image and integration logo for HACS and Home Assistant UI
 
 ### 0.1.0 — Initial Release
 - Quantile regression model for power consumption forecasting
