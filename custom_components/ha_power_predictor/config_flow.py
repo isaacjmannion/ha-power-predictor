@@ -18,6 +18,7 @@ from homeassistant.helpers import selector
 
 from .const import (
     CONF_HISTORY_DAYS,
+    CONF_INTEGRATION_NAME,
     CONF_MAX_POWER,
     CONF_MIN_POWER,
     CONF_N_POWER_LAGS,
@@ -27,12 +28,11 @@ from .const import (
     CONF_PEAK_QUANTILE,
     CONF_PEAK_START,
     CONF_POWER_ENTITY,
-    CONF_QUANTILE,
     CONF_TEMPERATURE_ENTITY,
     CONF_UPDATE_INTERVAL_MINUTES,
-    CONF_USE_DYNAMIC_QUANTILE,
     CONF_WEATHER_FORECAST_ENTITY,
     DEFAULT_HISTORY_DAYS,
+    DEFAULT_INTEGRATION_NAME,
     DEFAULT_MAX_POWER,
     DEFAULT_MIN_POWER,
     DEFAULT_N_POWER_LAGS,
@@ -41,15 +41,14 @@ from .const import (
     DEFAULT_PEAK_END,
     DEFAULT_PEAK_QUANTILE,
     DEFAULT_PEAK_START,
-    DEFAULT_QUANTILE,
     DEFAULT_UPDATE_INTERVAL_MINUTES,
-    DEFAULT_USE_DYNAMIC_QUANTILE,
     DOMAIN,
 )
 
 # ── Step 1 schema: entity selectors ─────────────────────────────────────────
 
 STEP_ENTITIES_SCHEMA = vol.Schema({
+    vol.Optional(CONF_INTEGRATION_NAME, default=DEFAULT_INTEGRATION_NAME): selector.TextSelector(),
     vol.Required(CONF_POWER_ENTITY): selector.EntitySelector(
         selector.EntitySelectorConfig(domain="sensor")
     ),
@@ -110,16 +109,6 @@ def _model_schema(defaults: dict) -> vol.Schema:
             default=_d(CONF_N_TEMP_LAGS, DEFAULT_N_TEMP_LAGS),
         ): selector.NumberSelector(
             selector.NumberSelectorConfig(min=0, max=20, step=1, mode="box")
-        ),
-        vol.Required(
-            CONF_USE_DYNAMIC_QUANTILE,
-            default=_d(CONF_USE_DYNAMIC_QUANTILE, DEFAULT_USE_DYNAMIC_QUANTILE),
-        ): selector.BooleanSelector(),
-        vol.Required(
-            CONF_QUANTILE,
-            default=_d(CONF_QUANTILE, DEFAULT_QUANTILE),
-        ): selector.NumberSelector(
-            selector.NumberSelectorConfig(min=0.5, max=0.99, step=0.01, mode="slider")
         ),
         vol.Required(
             CONF_PEAK_START,
@@ -184,7 +173,8 @@ class PowerPredictorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             data = {**self._entity_data, **_coerce_numbers(user_input)}
-            return self.async_create_entry(title="HA Power Predictor", data=data)
+            title = self._entity_data.get(CONF_INTEGRATION_NAME, DEFAULT_INTEGRATION_NAME)
+            return self.async_create_entry(title=title, data=data)
 
         return self.async_show_form(
             step_id="model",

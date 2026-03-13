@@ -25,7 +25,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN
+from .const import CONF_INTEGRATION_NAME, DEFAULT_INTEGRATION_NAME, DOMAIN
 from .coordinator import PowerPredictorCoordinator
 
 
@@ -74,7 +74,10 @@ class PowerPredictionSensor(CoordinatorEntity[PowerPredictorCoordinator], Sensor
         super().__init__(coordinator)
         self._window_hours = window_hours
         self._attr_unique_id = f"{entry.entry_id}_prediction_{window_hours}h"
-        self._attr_name = f"Power Prediction {window_hours}h"
+
+        # Get integration name from config, falling back to default
+        integration_name = entry.data.get(CONF_INTEGRATION_NAME, DEFAULT_INTEGRATION_NAME)
+        self._attr_name = f"{integration_name} {window_hours}h"
 
     @property
     def _window_predictions(self) -> list[dict]:
@@ -164,7 +167,10 @@ class FittedModelSensor(CoordinatorEntity[PowerPredictorCoordinator], SensorEnti
     ) -> None:
         super().__init__(coordinator)
         self._attr_unique_id = f"{entry.entry_id}_fitted_model"
-        self._attr_name = "Power Prediction Fitted Model"
+
+        # Get integration name from config, falling back to default
+        integration_name = entry.data.get(CONF_INTEGRATION_NAME, DEFAULT_INTEGRATION_NAME)
+        self._attr_name = f"{integration_name} Fitted Model"
 
     @property
     def native_value(self) -> float | None:

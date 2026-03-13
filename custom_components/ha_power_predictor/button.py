@@ -13,7 +13,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN
+from .const import CONF_INTEGRATION_NAME, DEFAULT_INTEGRATION_NAME, DOMAIN
 from .coordinator import PowerPredictorCoordinator
 
 
@@ -38,7 +38,6 @@ class TrainNowButton(ButtonEntity):
 
     _attr_icon = "mdi:brain"
     _attr_has_entity_name = True
-    _attr_name = "Train Now"
 
     def __init__(
         self,
@@ -47,6 +46,10 @@ class TrainNowButton(ButtonEntity):
     ) -> None:
         self._coordinator = coordinator
         self._attr_unique_id = f"{entry.entry_id}_train_now"
+
+        # Get integration name from config, falling back to default
+        integration_name = entry.data.get(CONF_INTEGRATION_NAME, DEFAULT_INTEGRATION_NAME)
+        self._attr_name = f"{integration_name} Train Now"
 
     async def async_press(self) -> None:
         """Immediately trigger a full pipeline run."""

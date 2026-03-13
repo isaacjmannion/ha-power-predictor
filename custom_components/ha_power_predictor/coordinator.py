@@ -41,10 +41,8 @@ from .const import (
     CONF_PEAK_QUANTILE,
     CONF_PEAK_START,
     CONF_POWER_ENTITY,
-    CONF_QUANTILE,
     CONF_TEMPERATURE_ENTITY,
     CONF_UPDATE_INTERVAL_MINUTES,
-    CONF_USE_DYNAMIC_QUANTILE,
     CONF_WEATHER_FORECAST_ENTITY,
     DEFAULT_HISTORY_DAYS,
     DEFAULT_MAX_POWER,
@@ -55,13 +53,12 @@ from .const import (
     DEFAULT_PEAK_END,
     DEFAULT_PEAK_QUANTILE,
     DEFAULT_PEAK_START,
-    DEFAULT_QUANTILE,
     DEFAULT_UPDATE_INTERVAL_MINUTES,
-    DEFAULT_USE_DYNAMIC_QUANTILE,
     DOMAIN,
     MIN_TRAINING_SAMPLES,
     PREDICTION_HOURS,
 )
+
 from .data_processing import add_lagged_features, get_default_features, process_ha_statistics
 from .models import QuantileRegressionModel, predict_iterative
 
@@ -105,18 +102,15 @@ class PowerPredictorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         history_days: int = int(cfg.get(CONF_HISTORY_DAYS, DEFAULT_HISTORY_DAYS))
         n_power_lags: int = int(cfg.get(CONF_N_POWER_LAGS, DEFAULT_N_POWER_LAGS))
         n_temp_lags: int = int(cfg.get(CONF_N_TEMP_LAGS, DEFAULT_N_TEMP_LAGS))
-        quantile: float = float(cfg.get(CONF_QUANTILE, DEFAULT_QUANTILE))
-        use_dynamic: bool = bool(cfg.get(CONF_USE_DYNAMIC_QUANTILE, DEFAULT_USE_DYNAMIC_QUANTILE))
 
         min_power: float = float(cfg.get(CONF_MIN_POWER, DEFAULT_MIN_POWER))
         max_power: float = float(cfg.get(CONF_MAX_POWER, DEFAULT_MAX_POWER))
-        if use_dynamic:
-            dynamic_config = {
-                "peak_start": int(cfg.get(CONF_PEAK_START, DEFAULT_PEAK_START)),
-                "peak_end": int(cfg.get(CONF_PEAK_END, DEFAULT_PEAK_END)),
-                "peak_quantile": float(cfg.get(CONF_PEAK_QUANTILE, DEFAULT_PEAK_QUANTILE)),
-                "offpeak_quantile": float(cfg.get(CONF_OFFPEAK_QUANTILE, DEFAULT_OFFPEAK_QUANTILE)),
-            }
+        dynamic_config = {
+            "peak_start": int(cfg.get(CONF_PEAK_START, DEFAULT_PEAK_START)),
+            "peak_end": int(cfg.get(CONF_PEAK_END, DEFAULT_PEAK_END)),
+            "peak_quantile": float(cfg.get(CONF_PEAK_QUANTILE, DEFAULT_PEAK_QUANTILE)),
+            "offpeak_quantile": float(cfg.get(CONF_OFFPEAK_QUANTILE, DEFAULT_OFFPEAK_QUANTILE)),
+        }
 
         # ── Step 1: Fetch recorder statistics ────────────────────────────────
         _LOGGER.debug("Fetching %d days of statistics for %s and %s", history_days, power_entity, temp_entity)
@@ -181,7 +175,7 @@ class PowerPredictorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         # ── Step 5: Train on full dataset ────────────────────────────────────
         _LOGGER.debug("Training quantile regression model on %d samples", len(df))
-        model = QuantileRegressionModel(quantile=quantile, dynamic_config=dynamic_config)
+        model = QuantileRegressionModel(dynamic_config=dynamic_config)
         await self.hass.async_add_executor_job(
             model.train,
             df[features].values,
@@ -371,9 +365,12 @@ def _build_future_df(
         try:
             dt = pd.to_datetime(fc["datetime"])
             if dt.tzinfo is None:
-                dt = dt.tz_localize("UTC") if tz is None else dt.tz_localize(tz)
-            else:
-                dt = dt.tz_convert(tz)
+                # Naive datetimes are assumed to be in HA's local timezone (not UTC)
+                # This handles integrations like BoM that provide timezone-naive forecasts
+                ha_tz = dt_util.get_default_time_zone()
+                dt = dt.tz_localize(ha_tz)
+            # Convert to the working timezone (derived from historical data)
+            dt = dt.tz_convert(tz) if tz else dt
             dt = dt.replace(minute=0, second=0, microsecond=0)
             forecast_lookup[dt] = float(fc["temperature"])
         except (KeyError, ValueError, TypeError, AttributeError):

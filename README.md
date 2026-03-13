@@ -1,3 +1,5 @@
+![HA Power Predictor Banner](images/banner.png)
+
 # HA Power Predictor
 
 [![GitHub Release](https://img.shields.io/github/v/release/isaacjmannion/ha-power-predictor?style=flat-square)](https://github.com/isaacjmannion/ha-power-predictor/releases)
@@ -169,11 +171,14 @@ series:
     curve: smooth
     stroke_width: 2
     data_generator: |
-      const now = Date.now();
       const fitted = entity.attributes.fitted || [];
+      const now = Date.now();
       return fitted
-        .filter(item => item && item.time && item.value !== undefined
-                        && new Date(item.time).getTime() <= now)
+        .filter(item => {
+          if (!item || !item.time || item.value === undefined) return false;
+          const itemTime = new Date(item.time).getTime();
+          return itemTime < now - 60000;
+        })
         .map(item => [new Date(item.time).getTime(), parseFloat(item.value)]);
   - entity: sensor.power_prediction_48h
     name: 48 h Forecast
@@ -216,6 +221,11 @@ series:
 - **Discussions**: [GitHub Discussions](https://github.com/isaacjmannion/ha-power-predictor/discussions)
 
 ## Changelog
+
+### 0.2.0 — Remove dynamic quantile toggle
+- Dynamic peak/off-peak quantile is now always active (toggle removed)
+- Peak and off-peak quantiles remain fully configurable
+- Fixed `NameError` crash when dynamic quantile toggle was disabled
 
 ### 0.1.0 — Initial Release
 - Quantile regression model for power consumption forecasting
