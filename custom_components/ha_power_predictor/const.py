@@ -19,6 +19,7 @@ CONF_HISTORY_DAYS = "history_days"
 CONF_UPDATE_INTERVAL_MINUTES = "update_interval_minutes"
 CONF_MIN_POWER = "min_power"
 CONF_MAX_POWER = "max_power"
+CONF_MAX_FORECAST_HOURS = "max_forecast_hours"
 
 # Defaults
 DEFAULT_INTEGRATION_NAME = "Power Predictor"
@@ -32,7 +33,8 @@ DEFAULT_HISTORY_DAYS = 30
 DEFAULT_UPDATE_INTERVAL_MINUTES = 10
 DEFAULT_MIN_POWER = 0.5
 DEFAULT_MAX_POWER = 15.0
+DEFAULT_MAX_FORECAST_HOURS = 48  # 2 days
 
 # Pipeline constants
 MIN_TRAINING_SAMPLES = 24  # 1 day of hourly statistics
-PREDICTION_HOURS = 48
+MAX_FORECAST_HOURS_LIMIT = 168  # 7 days maximum

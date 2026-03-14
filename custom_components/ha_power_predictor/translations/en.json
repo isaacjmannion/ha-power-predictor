@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Entity Configuration",
-        "description": "Select the Home Assistant entities to use for power prediction. All three entities must have long-term statistics enabled in the recorder.",
+        "description": "Select the Home Assistant entities to use for power prediction. All three entities must have sufficent statistics available in the recorder.",
         "data": {
           "integration_name": "Integration Name",
           "power_entity": "Power Consumption Entity",
@@ -30,7 +30,8 @@
           "peak_start": "Peak Period Start Hour (0–23)",
           "peak_end": "Peak Period End Hour (0–23)",
           "peak_quantile": "Peak Period Quantile",
-          "offpeak_quantile": "Off-Peak Quantile"
+          "offpeak_quantile": "Off-Peak Quantile",
+          "max_forecast_hours": "Max Forecast Hours"
         },
         "data_description": {
           "min_power": "Clamp predicted values to at least this value in kW (0 = no minimum beyond zero) Set around you min overnight usage.",
@@ -42,7 +43,8 @@
           "peak_start": "Hour of day when the peak period begins (inclusive).",
           "peak_end": "Hour of day when the peak period ends (inclusive).",
           "peak_quantile": "Quantile applied during peak hours.",
-          "offpeak_quantile": "Quantile applied during off-peak hours."
+          "offpeak_quantile": "Quantile applied during off-peak hours.",
+          "max_forecast_hours": "Maximum hours to forecast into the future (48–168 hours / 2-7 days). Note: Forecasts beyond weather data availability will use historical average temperature."
         }
       }
     },
@@ -65,7 +67,8 @@
           "peak_start": "Peak Period Start Hour",
           "peak_end": "Peak Period End Hour",
           "peak_quantile": "Peak Period Quantile",
-          "offpeak_quantile": "Off-Peak Quantile"
+          "offpeak_quantile": "Off-Peak Quantile",
+          "max_forecast_hours": "Max Forecast Hours"
         }
       }
     }

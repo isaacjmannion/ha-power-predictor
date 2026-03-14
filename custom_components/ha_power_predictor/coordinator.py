@@ -32,6 +32,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_HISTORY_DAYS,
+    CONF_MAX_FORECAST_HOURS,
     CONF_MAX_POWER,
     CONF_MIN_POWER,
     CONF_N_POWER_LAGS,
@@ -45,6 +46,7 @@ from .const import (
     CONF_UPDATE_INTERVAL_MINUTES,
     CONF_WEATHER_FORECAST_ENTITY,
     DEFAULT_HISTORY_DAYS,
+    DEFAULT_MAX_FORECAST_HOURS,
     DEFAULT_MAX_POWER,
     DEFAULT_MIN_POWER,
     DEFAULT_N_POWER_LAGS,
@@ -56,7 +58,6 @@ from .const import (
     DEFAULT_UPDATE_INTERVAL_MINUTES,
     DOMAIN,
     MIN_TRAINING_SAMPLES,
-    PREDICTION_HOURS,
 )
 
 from .data_processing import add_lagged_features, get_default_features, process_ha_statistics
@@ -102,6 +103,7 @@ class PowerPredictorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         history_days: int = int(cfg.get(CONF_HISTORY_DAYS, DEFAULT_HISTORY_DAYS))
         n_power_lags: int = int(cfg.get(CONF_N_POWER_LAGS, DEFAULT_N_POWER_LAGS))
         n_temp_lags: int = int(cfg.get(CONF_N_TEMP_LAGS, DEFAULT_N_TEMP_LAGS))
+        max_forecast_hours: int = int(cfg.get(CONF_MAX_FORECAST_HOURS, DEFAULT_MAX_FORECAST_HOURS))
 
         min_power: float = float(cfg.get(CONF_MIN_POWER, DEFAULT_MIN_POWER))
         max_power: float = float(cfg.get(CONF_MAX_POWER, DEFAULT_MAX_POWER))
@@ -209,20 +211,20 @@ class PowerPredictorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
 
         # ── Step 6: Build future feature matrix ──────────────────────────────
-        _LOGGER.debug("Building future feature matrix (%d hours)", PREDICTION_HOURS)
+        _LOGGER.debug("Building future feature matrix (%d hours)", max_forecast_hours)
         df_future: pd.DataFrame = await self.hass.async_add_executor_job(
             _build_future_df,
             df,
             forecast_data,
             mean_temp_fallback,
-            PREDICTION_HOURS,
+            max_forecast_hours,
             features,
             n_power_lags,
             n_temp_lags,
         )
 
         # ── Step 7: Generate predictions ─────────────────────────────────────
-        _LOGGER.debug("Generating %d-hour iterative predictions", PREDICTION_HOURS)
+        _LOGGER.debug("Generating %d-hour iterative predictions", max_forecast_hours)
         future_result = await self.hass.async_add_executor_job(
             predict_iterative,
             df_future[features].values,
@@ -257,6 +259,7 @@ class PowerPredictorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "fitted_coverage": fitted_coverage,
             "power_entity": power_entity,
             "history_days": history_days,
+            "max_forecast_hours": max_forecast_hours,
             "last_updated": dt_util.now().isoformat(),
             "training_samples": len(df),
         }
