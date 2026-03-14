@@ -226,7 +226,13 @@ series:
 
 ## Changelog
 
-### 0.2.0 — Bug fixes
+### 0.2.1 — Extended forecast support
+- Added configurable extended forecast sensor with 2-7 day range
+- New `sensor.power_prediction_extended` provides forecasts up to 168 hours (7 days)
+- Configurable max forecast hours via options (48-168 hours, step: 24)
+- Forecast gracefully falls back to historical mean temperature beyond weather data availability
+
+### 0.2.0 — Bug fixes and UI improvements
 - Dynamic peak/off-peak quantile is now always active (toggle removed)
 - Peak and off-peak quantiles remain fully configurable
 - Fixed `NameError` crash when dynamic quantile toggle was disabled
