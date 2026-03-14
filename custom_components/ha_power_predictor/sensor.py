@@ -1,9 +1,10 @@
 """
 Sensor platform for HA Power Predictor.
 
-Registers two sensors:
-  - sensor.power_prediction_24h  — covers the next 24 hours
-  - sensor.power_prediction_48h  — covers the next 48 hours
+Registers three prediction sensors:
+  - sensor.power_prediction_24h       — covers the next 24 hours
+  - sensor.power_prediction_48h       — covers the next 48 hours
+  - sensor.power_prediction_extended  — covers up to max_forecast_hours (configurable)
 
 Attribute format:
   source_entity        str  — entity ID used for training
@@ -34,11 +35,12 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up the two prediction sensors from a config entry."""
+    """Set up the prediction sensors from a config entry."""
     coordinator: PowerPredictorCoordinator = hass.data[DOMAIN][entry.entry_id]
     async_add_entities([
         PowerPredictionSensor(coordinator, entry, window_hours=24),
         PowerPredictionSensor(coordinator, entry, window_hours=48),
+        ExtendedForecastSensor(coordinator, entry),
         FittedModelSensor(coordinator, entry),
     ])
 
@@ -128,6 +130,91 @@ class PowerPredictionSensor(CoordinatorEntity[PowerPredictorCoordinator], Sensor
         return {
             "source_entity": data.get("power_entity"),
             "history_days": data.get("history_days"),
+            "last_forecast_update": last_updated_local,
+            "forecast": forecast,
+        }
+
+
+class ExtendedForecastSensor(CoordinatorEntity[PowerPredictorCoordinator], SensorEntity):
+    """
+    Extended power prediction sensor showing all available forecast hours.
+
+    State
+    -----
+    Predicted kW for the next full hour (predictions[0]).
+
+    Attributes
+    ----------
+    source_entity        Entity ID of the power consumption sensor used for training.
+    history_days         Number of days of history the model trained on.
+    max_forecast_hours   Maximum forecast hours configured (e.g., 48, 72, 168).
+    last_forecast_update Friendly local-time string of when the pipeline last ran.
+    forecast             List of {time, value} dicts for all available hours.
+    """
+
+    _attr_device_class = SensorDeviceClass.POWER
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = "kW"
+    _attr_icon = "mdi:lightning-bolt"
+    _attr_has_entity_name = True
+
+    def __init__(
+        self,
+        coordinator: PowerPredictorCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{entry.entry_id}_prediction_extended"
+
+        # Get integration name from config, falling back to default
+        integration_name = entry.data.get(CONF_INTEGRATION_NAME, DEFAULT_INTEGRATION_NAME)
+        self._attr_name = f"{integration_name} Extended Forecast"
+
+    @property
+    def native_value(self) -> float | None:
+        """State — predicted kW for the next hour."""
+        if not self.coordinator.data:
+            return None
+        predictions = self.coordinator.data.get("predictions", [])
+        return predictions[0]["predicted"] if predictions else None
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        """Attributes — full extended forecast in local time."""
+        data = self.coordinator.data
+        if not data:
+            return {}
+
+        predictions = data.get("predictions", [])
+        if not predictions:
+            return {}
+
+        # Format last_updated as a friendly local datetime string
+        last_updated_raw = data.get("last_updated", "")
+        try:
+            last_updated_local = dt_util.as_local(
+                dt_util.parse_datetime(last_updated_raw)
+            ).strftime("%B %-d, %Y at %H:%M:%S")
+        except (TypeError, ValueError, AttributeError):
+            last_updated_local = last_updated_raw
+
+        # Build forecast list: {time: ISO local with offset, value: kW}
+        forecast = []
+        for p in predictions:
+            try:
+                utc_dt = dt_util.parse_datetime(p["timestamp"])
+                local_dt = dt_util.as_local(utc_dt)
+                forecast.append({
+                    "time": local_dt.isoformat(),
+                    "value": p["predicted"],
+                })
+            except (TypeError, ValueError, AttributeError):
+                continue
+
+        return {
+            "source_entity": data.get("power_entity"),
+            "history_days": data.get("history_days"),
+            "max_forecast_hours": data.get("max_forecast_hours"),
             "last_forecast_update": last_updated_local,
             "forecast": forecast,
         }

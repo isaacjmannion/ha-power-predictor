@@ -78,22 +78,26 @@ Tune the model behaviour via **Settings → Devices & Services → HA Power Pred
 | `Peak End Hour` | Hour the peak period ends (0–23, inclusive) | 22 |
 | `Peak Quantile` | Quantile applied during peak hours | 0.75 |
 | `Off-Peak Quantile` | Quantile applied during off-peak hours | 0.50 |
+| `Max Forecast Hours` | Maximum hours to forecast (48–168 hours / 2-7 days) | 48 |
+
+> **Note**: Forecasts beyond weather forecast availability (typically 2-3 days) will use historical average temperature and may have reduced accuracy.
 
 ---
 
 ## Published Sensors
 
-After the first successful prediction run, three sensors are created:
+After the first successful prediction run, four sensors are created:
 
 | Sensor | State | Description |
 |--------|-------|-------------|
 | `sensor.power_prediction_24h` | kW | Predicted load for the next hour; includes a `forecast` attribute with hourly values for the next 24 hours |
 | `sensor.power_prediction_48h` | kW | Predicted load for the next hour; includes a `forecast` attribute with hourly values for the next 48 hours |
+| `sensor.power_prediction_extended` | kW | Predicted load for the next hour; includes a `forecast` attribute with all available hours up to `max_forecast_hours` (configurable: 48-168 hours) |
 | `sensor.power_prediction_fitted_model` | % | In-sample coverage — the fraction of historical hourly values that fell at or below the model's prediction (e.g. ~75% for a well-calibrated `q=0.75` model); includes a `fitted` attribute with hourly fitted values for the previous 48 hours |
 
 ### Sensor Attribute Format
 
-All three sensors share these common attributes:
+All prediction sensors share these common attributes:
 
 ```yaml
 source_entity: sensor.sigen_plant_consumed_power
@@ -101,7 +105,7 @@ history_days: 15
 last_forecast_update: "February 23, 2026 at 11:21:06"
 ```
 
-`sensor.power_prediction_24h` / `sensor.power_prediction_48h` also expose:
+`sensor.power_prediction_24h` / `sensor.power_prediction_48h` / `sensor.power_prediction_extended` also expose:
 
 ```yaml
 forecast:
@@ -221,10 +225,14 @@ series:
 
 ## Changelog
 
-### 0.2.0 — Remove dynamic quantile toggle
+### 0.2.0 — Bug fixes
 - Dynamic peak/off-peak quantile is now always active (toggle removed)
 - Peak and off-peak quantiles remain fully configurable
 - Fixed `NameError` crash when dynamic quantile toggle was disabled
+- Fixed timezone-naive forecast handling for BoM and similar integrations
+- Added customizable integration name to support multiple predictor instances
+- Fixed ApexCharts fitted model line extending past "Now" marker
+- Added banner image and integration logo for HACS and Home Assistant UI
 
 ### 0.1.0 — Initial Release
 - Quantile regression model for power consumption forecasting

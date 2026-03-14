@@ -19,6 +19,7 @@ from homeassistant.helpers import selector
 from .const import (
     CONF_HISTORY_DAYS,
     CONF_INTEGRATION_NAME,
+    CONF_MAX_FORECAST_HOURS,
     CONF_MAX_POWER,
     CONF_MIN_POWER,
     CONF_N_POWER_LAGS,
@@ -33,6 +34,7 @@ from .const import (
     CONF_WEATHER_FORECAST_ENTITY,
     DEFAULT_HISTORY_DAYS,
     DEFAULT_INTEGRATION_NAME,
+    DEFAULT_MAX_FORECAST_HOURS,
     DEFAULT_MAX_POWER,
     DEFAULT_MIN_POWER,
     DEFAULT_N_POWER_LAGS,
@@ -43,6 +45,7 @@ from .const import (
     DEFAULT_PEAK_START,
     DEFAULT_UPDATE_INTERVAL_MINUTES,
     DOMAIN,
+    MAX_FORECAST_HOURS_LIMIT,
 )
 
 # ── Step 1 schema: entity selectors ─────────────────────────────────────────
@@ -133,6 +136,12 @@ def _model_schema(defaults: dict) -> vol.Schema:
             default=_d(CONF_OFFPEAK_QUANTILE, DEFAULT_OFFPEAK_QUANTILE),
         ): selector.NumberSelector(
             selector.NumberSelectorConfig(min=0.5, max=0.99, step=0.01, mode="slider")
+        ),
+        vol.Required(
+            CONF_MAX_FORECAST_HOURS,
+            default=_d(CONF_MAX_FORECAST_HOURS, DEFAULT_MAX_FORECAST_HOURS),
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(min=48, max=MAX_FORECAST_HOURS_LIMIT, step=24, mode="box")
         ),
     })
 
@@ -236,5 +245,6 @@ def _coerce_numbers(data: dict) -> dict:
         CONF_N_TEMP_LAGS,
         CONF_PEAK_START,
         CONF_PEAK_END,
+        CONF_MAX_FORECAST_HOURS,
     }
     return {k: int(v) if k in int_fields else v for k, v in data.items()}
