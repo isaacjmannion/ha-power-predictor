@@ -371,7 +371,11 @@ def _build_future_df(
                 # Naive datetimes are assumed to be in HA's local timezone (not UTC)
                 # This handles integrations like BoM that provide timezone-naive forecasts
                 ha_tz = dt_util.get_default_time_zone()
-                dt = dt.tz_localize(ha_tz)
+                try:
+                    dt = dt.tz_localize(ha_tz, ambiguous='infer')
+                except pytz.exceptions.AmbiguousTimeError:
+                    # Fallback: assume standard time (post-DST, fold=1)
+                    dt = dt.tz_localize(ha_tz, ambiguous=False)
             # Convert to the working timezone (derived from historical data)
             dt = dt.tz_convert(tz) if tz else dt
             dt = dt.replace(minute=0, second=0, microsecond=0)
