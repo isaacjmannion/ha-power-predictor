@@ -26,6 +26,7 @@ import pandas as pd
 from homeassistant.components.recorder import get_instance
 from homeassistant.components.recorder.statistics import statistics_during_period
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
@@ -300,6 +301,14 @@ class PowerPredictorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         entity does not provide a forecast — the pipeline will fall back to
         the historical mean temperature for any missing hours.
         """
+        state = self.hass.states.get(entity_id)
+        if state is None or state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+            _LOGGER.debug(
+                "Weather entity '%s' not ready (state=%s); will retry next cycle",
+                entity_id,
+                state.state if state else "missing",
+            )
+            return []
         try:
             response = await self.hass.services.async_call(
                 "weather",
