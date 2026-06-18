@@ -1,4 +1,5 @@
 *.bak
 /.idea
-/__pycache__
+__pycache__/
+*.pyc
 48hr.txt

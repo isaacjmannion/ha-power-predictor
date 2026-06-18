@@ -22,9 +22,10 @@ Algorithm overview (IRLS for quantile regression):
     typically 20–50 iterations for datasets of this size.
 """
 
-import numpy as np
 import logging
-from typing import Dict, Optional, Any
+from typing import Any, Dict, Optional
+
+import numpy as np
 
 logger = logging.getLogger(__name__)
 

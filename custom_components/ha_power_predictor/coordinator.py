@@ -22,7 +22,6 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-
 from homeassistant.components.recorder import get_instance
 from homeassistant.components.recorder.statistics import statistics_during_period
 from homeassistant.config_entries import ConfigEntry
@@ -60,7 +59,6 @@ from .const import (
     DOMAIN,
     MIN_TRAINING_SAMPLES,
 )
-
 from .data_processing import add_lagged_features, get_default_features, process_ha_statistics
 from .models import QuantileRegressionModel, predict_iterative
 
@@ -79,7 +77,9 @@ class PowerPredictorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         self.entry = entry
         cfg = {**entry.data, **entry.options}
-        interval_minutes = int(cfg.get(CONF_UPDATE_INTERVAL_MINUTES, DEFAULT_UPDATE_INTERVAL_MINUTES))
+        interval_minutes = int(
+            cfg.get(CONF_UPDATE_INTERVAL_MINUTES, DEFAULT_UPDATE_INTERVAL_MINUTES)
+        )
 
         super().__init__(
             hass,
@@ -116,7 +116,12 @@ class PowerPredictorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         }
 
         # ── Step 1: Fetch recorder statistics ────────────────────────────────
-        _LOGGER.debug("Fetching %d days of statistics for %s and %s", history_days, power_entity, temp_entity)
+        _LOGGER.debug(
+            "Fetching %d days of statistics for %s and %s",
+            history_days,
+            power_entity,
+            temp_entity,
+        )
         now_utc = dt_util.utcnow()
         start_utc = now_utc - timedelta(days=history_days)
 
