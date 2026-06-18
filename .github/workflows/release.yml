@@ -31,7 +31,8 @@ jobs:
       - name: Zip the integration
         run: |
           cd custom_components/ha_power_predictor
-          zip -r ha_power_predictor.zip .
+          # Exclude dev-only files (e.g. CLAUDE.md) from the shipped artifact.
+          zip -r ha_power_predictor.zip . -x "CLAUDE.md"
 
       - name: Attach zip to the release
         uses: softprops/action-gh-release@v2
