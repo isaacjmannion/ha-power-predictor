@@ -99,7 +99,7 @@ def _model_schema(defaults: dict) -> vol.Schema:
             CONF_UPDATE_INTERVAL_MINUTES,
             default=_d(CONF_UPDATE_INTERVAL_MINUTES, DEFAULT_UPDATE_INTERVAL_MINUTES),
         ): selector.NumberSelector(
-            selector.NumberSelectorConfig(min=15, max=1440, step=15, mode="box")
+            selector.NumberSelectorConfig(min=5, max=1440, step=5, mode="box")
         ),
         vol.Required(
             CONF_N_POWER_LAGS,
