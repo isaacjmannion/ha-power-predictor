@@ -1,0 +1,12 @@
+# Test dependencies for the HA-harness job (tests/ha).
+#
+# pytest-homeassistant-custom-component ships the exact Home Assistant version it
+# targets, so the two are pinned together — bump them as a matching pair (this
+# pair targets HA 2026.6.3 and needs Python 3.14). numpy/pandas mirror the
+# integration's runtime requirements so coordinator/data_processing import cleanly.
+pytest>=8,<9
+pytest-cov
+numpy>=1.24.0
+pandas>=2.0.0
+homeassistant==2026.6.3
+pytest-homeassistant-custom-component==0.13.339
