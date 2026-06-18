@@ -1,0 +1,39 @@
+name: Release
+
+# CD: when you PUBLISH a GitHub release, stamp the tag's version into the
+# integration manifest and attach a ready-to-install zip as a release asset.
+# (Triggers only on a published release, so it never runs on push/PR.)
+on:
+  release:
+    types: [published]
+
+permissions: {}
+
+jobs:
+  release:
+    name: Build release asset
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write          # required only to upload the asset to the release
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Stamp version from the release tag
+        shell: bash
+        run: |
+          version="${{ github.event.release.tag_name }}"
+          version="${version#v}"          # strip a leading "v" (v0.2.2 -> 0.2.2)
+          tmp="$(mktemp)"
+          jq --arg v "$version" '.version = $v' \
+            custom_components/ha_power_predictor/manifest.json > "$tmp"
+          mv "$tmp" custom_components/ha_power_predictor/manifest.json
+
+      - name: Zip the integration
+        run: |
+          cd custom_components/ha_power_predictor
+          zip -r ha_power_predictor.zip .
+
+      - name: Attach zip to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: custom_components/ha_power_predictor/ha_power_predictor.zip
