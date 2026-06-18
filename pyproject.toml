@@ -1,0 +1,11 @@
+# Ruff configuration for HA Power Predictor.
+#
+# Lenient starter rule set so CI is green today: real errors (pyflakes F),
+# pycodestyle errors/warnings (E/W) and import sorting (I). Tighten over time by
+# adding rule groups (e.g. "UP", "B", "D" for docstrings, "T20" to ban print).
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]

@@ -1,0 +1,27 @@
+name: Lint
+
+# Style/quality feedback via ruff (Home Assistant's standard linter).
+# Advisory for now: it reports problems but isn't a merge gate. The rule set
+# in pyproject.toml is intentionally lenient and can be tightened over time.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions: {}
+
+jobs:
+  ruff:
+    name: Ruff
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install ruff
+        # Pinned to match the version used locally so CI and local agree.
+        run: pip install ruff==0.15.17
+      - name: Ruff check
+        run: ruff check .
