@@ -1,13 +1,12 @@
 {
   "domain": "ha_power_predictor",
   "name": "HA Power Predictor",
-  "version": "0.2.1",
+  "codeowners": ["@isaacjmannion"],
   "config_flow": true,
   "dependencies": ["recorder"],
-  "requirements": [
-    "numpy>=1.24.0",
-    "pandas>=2.0.0"
-  ],
+  "documentation": "https://github.com/isaacjmannion/ha-power-predictor",
   "iot_class": "local_polling",
-  "codeowners": []
+  "issue_tracker": "https://github.com/isaacjmannion/ha-power-predictor/issues",
+  "requirements": ["numpy>=1.24.0", "pandas>=2.0.0"],
+  "version": "0.2.1"
 }

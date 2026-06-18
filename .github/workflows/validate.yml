@@ -1,0 +1,37 @@
+name: Validate
+
+# CI: runs on every push/PR to main, once a day on a schedule (to catch
+# breaking changes in the upstream HACS/hassfest validators even when we
+# aren't committing), and on demand via the Actions tab.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  hassfest:
+    # Home Assistant's official validator for the integration manifest.
+    name: Hassfest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: home-assistant/actions/hassfest@master
+
+  hacs:
+    # Checks the repository is correctly structured for HACS distribution.
+    name: HACS
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hacs/action@main
+        with:
+          category: integration
+          # We are not registered in the Home Assistant brands repo, so skip
+          # that specific check (icons ship in the integration's brand/ folder).
+          ignore: brands

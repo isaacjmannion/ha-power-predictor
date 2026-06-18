@@ -91,11 +91,11 @@ just calls `coordinator.async_request_refresh()` on press.
   the user's local timezone happens only in `sensor.py` for display attributes.
 - **No new heavy dependencies.** The model is deliberately pure-numpy (no
   scikit-learn / scipy) so the integration stays light. Declared requirements
-  are `numpy>=1.24.0` and `pandas>=2.0.0`. **`manifest.json` is authoritative** —
-  HA reads `version`, `requirements`, and `dependencies` from it. `hacs.json` in
-  this repo duplicates those fields, but HACS does not actually consume them (it
-  installs nothing from `hacs.json` and takes releases from GitHub tags); keep
-  the duplicates matching only to avoid confusion.
+  are `numpy>=1.24.0` and `pandas>=2.0.0`, set in `manifest.json` — the single
+  source of truth for `version`, `requirements`, and `dependencies`. **Do not put
+  those keys in `hacs.json`:** the HACS validation action rejects any key outside
+  its own schema (`name`, `homeassistant`, `zip_release`, `filename`, …), so
+  `hacs.json` holds HACS metadata only.
 
 ## Validating changes
 
@@ -119,21 +119,19 @@ docstrings in `models.py`.
 
 ## Releasing / bumping the version
 
-The authoritative version is `version` in `manifest.json` (what HA reads).
-`hacs.json` carries a duplicate `version` that HACS does not actually use — keep
-it matching to avoid confusion. When releasing:
+`version` in `manifest.json` is the single source of truth (both HA and HACS
+read it). `hacs.json` must NOT carry a `version` key — the HACS validation
+action rejects it. When releasing:
 
-1. Bump `version` in `manifest.json` (and the duplicate in `hacs.json` to match).
+1. Bump `version` in `manifest.json`.
 2. Add a section to the Changelog in `README.md`.
-3. Tag/release on GitHub (HACS serves releases from GitHub tags).
+3. Tag/release on GitHub (HACS serves the latest GitHub release).
 
 ## Things that must stay consistent
 
-- `version` in `manifest.json` (authoritative) ⇄ the inert duplicate in
-  `hacs.json` (kept matching only to avoid confusion).
 - Config keys/defaults in `const.py` ⇄ selectors in `config_flow.py` ⇄ labels in
   `strings.json` ⇄ `translations/en.json`.
 - Sensor/attribute shapes documented in `README.md` ⇄ what `sensor.py` actually
   emits.
 - `DOMAIN` ("ha_power_predictor") ⇄ the folder name ⇄ `domain` in
-  `manifest.json`/`hacs.json`.
+  `manifest.json`.
