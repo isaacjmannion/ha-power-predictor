@@ -59,7 +59,8 @@ interval) and on demand (the "Train Now" button). On each run
 5. Trains a `QuantileRegressionModel` (separate peak/off-peak models).
 6. Computes in-sample fitted values + coverage % for charting.
 7. Builds a future feature matrix out to `max_forecast_hours` (`_build_future_df`).
-8. Generates predictions auto-regressively (`predict_iterative`).
+8. Generates predictions auto-regressively (`predict_iterative`), then adds any
+   configured per-hour offsets (still clamped to min/max power).
 9. Returns a dict that the sensor entities read.
 
 The sensors (`sensor.py`) are thin `CoordinatorEntity` wrappers — they hold no
@@ -79,21 +80,22 @@ just calls `coordinator.async_request_refresh()` on press.
   don't read `entry.data` alone for tunable parameters.
 - **`const.py` is the single source of truth for defaults.** When you add or
   change a config field, update `const.py` (key + default), `config_flow.py`
-  (selector + range), and both `strings.json` and `translations/en.json`.
-  Caveat: `DEFAULT_UPDATE_INTERVAL_MINUTES` (10) is below the `config_flow`
-  selector minimum (15) and is only ever hit as a code-level fallback — keep
-  defaults within their selector ranges when editing. The README config table
-  drifts from the code in several places (update interval, min/max power
-  defaults) **and** still documents removed options (`Use Dynamic Quantile`,
-  `Quantile`) that `config_flow.py` no longer exposes — trust
+  (selector + range), and both `strings.json` and `translations/en.json`; keep
+  defaults within their selector ranges. The README's "Model Parameters" table
+  drifts from the code in places (its update-interval / min-power / max-power
+  defaults are stale, and it still lists removed options `Use Dynamic Quantile` /
+  `Quantile` that `config_flow.py` no longer exposes) — trust
   `const.py`/`config_flow.py`, and fix the README if you touch defaults.
 - **`strings.json` and `translations/en.json` must stay in sync.** `strings.json`
   is the source; `en.json` is its English copy. They currently differ slightly
   (some legacy `use_dynamic_quantile`/`quantile` strings remain that the config
   flow no longer exposes — peak/off-peak quantiles are always active).
 - **Times are UTC inside the pipeline; local only at the edge.** Statistics,
-  features, and prediction timestamps are UTC-aware throughout. Conversion to
-  the user's local timezone happens only in `sensor.py` for display attributes.
+  features, and prediction timestamps are UTC-aware throughout, and the model's
+  `hour` feature plus the peak/off-peak window key off **UTC** hours. Two places
+  use **local** time: `sensor.py` (display attributes) and the **hour-of-day
+  offset** lookup (`dt_util.as_local(ts).hour`, so an offset for hour 13 lands at
+  1 pm on the user's clock). See the package CLAUDE.md "Hour-of-day offsets".
 - **No new heavy dependencies.** The model is deliberately pure-numpy (no
   scikit-learn / scipy) so the integration stays light. Declared requirements
   are `numpy>=1.24.0` and `pandas>=2.0.0`, set in `manifest.json` — the single
@@ -139,8 +141,9 @@ action rejects it. When releasing:
    `release.yml` then stamps the tag's version into the manifest and attaches
    `ha_power_predictor.zip` to the release. HACS serves the latest release.
 
-> `zip_release`/`filename` in `hacs.json` make HACS install from that zip asset;
-> only enable them once a release actually carries the zip.
+> `zip_release: true` + `filename: "ha_power_predictor.zip"` in `hacs.json` are
+> **active** — HACS installs from the zip asset `release.yml` attaches (faster,
+> atomic). Keep `filename` matching the zip name the workflow builds.
 
 ## Things that must stay consistent
 
@@ -150,3 +153,9 @@ action rejects it. When releasing:
   emits.
 - `DOMAIN` ("ha_power_predictor") ⇄ the folder name ⇄ `domain` in
   `manifest.json`.
+- Minimum HA version: `homeassistant` in `hacs.json` ⇄ README "Requirements"
+  (currently **2025.7** — the hour-offset editor uses the object-selector
+  `fields`/`multiple` row form added in HA 2025.7; don't drop below it without
+  changing that selector).
+- `filename` in `hacs.json` ⇄ the zip name `release.yml` builds
+  (`ha_power_predictor.zip`).

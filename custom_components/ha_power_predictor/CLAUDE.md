@@ -8,10 +8,10 @@ validation steps, and release process, see the repo-root `CLAUDE.md`.
 | File | Responsibility |
 |------|----------------|
 | `__init__.py` | `async_setup_entry` / `async_unload_entry`. Creates the coordinator, runs the first refresh (`async_config_entry_first_refresh`, which raises `ConfigEntryNotReady` to make HA retry), forwards the `sensor` + `button` platforms, and registers an options-update listener that **reloads the entry** so option changes take effect immediately. |
-| `coordinator.py` | `PowerPredictorCoordinator` (subclass of `DataUpdateCoordinator`). Owns `_async_update_data` — the full fetch→train→predict pipeline — plus the module-level pure function `_build_future_df`. |
+| `coordinator.py` | `PowerPredictorCoordinator` (subclass of `DataUpdateCoordinator`). Owns `_async_update_data` — the full fetch→train→predict pipeline, including applying the per-hour offsets — plus the module-level function `_build_future_df`. |
 | `models.py` | The ML core. `QuantileRegressionModel` + the standalone `predict_iterative`. Pure numpy — no sklearn/scipy. |
-| `data_processing.py` | `process_ha_statistics`, `add_lagged_features`, `get_default_features`, `_parse_start`. Turns recorder rows into the training DataFrame. |
-| `config_flow.py` | `PowerPredictorConfigFlow` (2 steps) + `PowerPredictorOptionsFlow`. Schema builders + `_coerce_numbers`. |
+| `data_processing.py` | Pure helpers (numpy/pandas only): `process_ha_statistics`, `add_lagged_features`, `get_default_features`, `normalize_hour_offsets`, `_parse_start`. Recorder rows → training DataFrame, plus offset-row normalization. |
+| `config_flow.py` | `PowerPredictorConfigFlow` (2 steps) + `PowerPredictorOptionsFlow`. `_model_schema` builder + `_coerce_numbers` + `_hour_offsets_error` (validates offset rows). |
 | `sensor.py` | Four entities: two `PowerPredictionSensor` (24h, 48h), one `ExtendedForecastSensor`, one `FittedModelSensor`. |
 | `button.py` | `TrainNowButton` → calls `coordinator.async_request_refresh()`. |
 | `const.py` | `DOMAIN`, `CONF_*` keys, `DEFAULT_*` values, and pipeline limits (`MIN_TRAINING_SAMPLES = 24`, `MAX_FORECAST_HOURS_LIMIT = 168`). |
@@ -63,6 +63,10 @@ local time and rename keys to `time`/`value` (see `README.md` for the published
 attribute format). If you change a key here, update the matching reader in
 `sensor.py`.
 
+Each `predictions[i]["predicted"]` already includes the configured per-hour
+offset, added **before** the min/max-power clamp; `fitted` / `fitted_coverage`
+do **not** (see "Hour-of-day offsets" below).
+
 ## The model (`models.py`)
 
 - **Algorithm:** quantile regression solved by **IRLS** (Iteratively Reweighted
@@ -93,9 +97,13 @@ Builds the next-`n_hours` feature rows starting at the next full hour. Key point
 - **Timezone** is taken from the historical timestamps' `tzinfo` (recorder UTC).
 - **Forecast lookup:** forecast entries are keyed by hour-truncated aware
   datetimes. **Timezone-naive forecast datetimes are assumed to be HA local
-  time** (not UTC) — this handles integrations like BoM. Hours with no matching
-  forecast fall back to `mean_temp_fallback` (the mean of historical
-  temperature). Beyond weather availability, accuracy degrades — that's expected.
+  time** (not UTC) — this handles integrations like BoM. They're localized with
+  `tz_localize(..., ambiguous=False, nonexistent="shift_forward")` so DST
+  transitions (the repeated fall-back hour / skipped spring-forward hour) don't
+  raise — **keep those two args** (a missing-`pytz` `except` here used to crash
+  the update at the changeover). Hours with no matching forecast fall back to
+  `mean_temp_fallback` (the mean of historical temperature). Beyond weather
+  availability, accuracy degrades — that's expected.
 - **Lag seeding via concat+shift:** instead of manually seeding lag columns, it
   concatenates the historical tail with the future stub rows and calls
   `.shift(i)`. This makes the first future rows inherit correct lags from real
@@ -114,6 +122,23 @@ Builds the next-`n_hours` feature rows starting at the next full hour. Key point
   processing failure so HA shows a clean retry, and enforces
   `len(df) >= MIN_TRAINING_SAMPLES` (24).
 
+## Hour-of-day offsets
+
+Users can add a fixed kW offset at specific hours of the day (config key
+`CONF_HOUR_OFFSETS`, stored as a list of `{"hour": int, "offset": float}` rows).
+
+- **Parsing:** `normalize_hour_offsets(raw)` in `data_processing.py` (pure) turns
+  the stored rows — or a `{hour: offset}` dict — into a validated
+  `{int hour: float offset}` map: hours coerced to ints kept in 0–23, offsets to
+  floats, last value wins on duplicate hours, malformed/out-of-range entries
+  dropped. Unit-tested in `tests/pure/test_data_processing.py`.
+- **Application (coordinator):** in the predictions loop the offset is matched on
+  the **local** hour-of-day (`dt_util.as_local(row["timestamp"]).hour`) so a row
+  for hour 13 lands at 1 pm on the user's clock (matching the locally-displayed
+  forecast), and it is added **before** the min/max-power clamp.
+- **Not applied to fitted:** the in-sample `fitted` series and `fitted_coverage`
+  stay on the raw model — that metric measures calibration, not a manual bias.
+
 ## Config flow notes
 
 - Step 1 (`user`) collects the optional integration name + the three required
@@ -123,3 +148,10 @@ Builds the next-`n_hours` feature rows starting at the next full hour. Key point
   re-adding the integration** (documented intent, not a bug).
 - `NumberSelector` always returns floats; `_coerce_numbers` casts the integer
   fields back to `int` before saving. Add any new integer field to that set.
+- **Hour-offsets field** (`CONF_HOUR_OFFSETS`): a `selector.ObjectSelector` with
+  `fields` + `multiple` (an add-a-row form of `{hour, offset}`). That selector
+  form needs **HA 2025.7+** (hence the bumped minimum), and it must stay
+  `vol.Optional` with `default=[]` or the form silently fails to render (HA core
+  issue #97474). `_hour_offsets_error` rejects rows with an out-of-range hour or
+  non-numeric offset; the value is a list, so it is **not** in `_coerce_numbers`'
+  integer set.
