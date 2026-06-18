@@ -155,6 +155,7 @@ def _model_schema(defaults: dict) -> vol.Schema:
                     "hour": {
                         "selector": {"number": {"min": 0, "max": 23, "step": 1, "mode": "box"}},
                         "required": True,
+                        "label": "Hour of day (0-23, local time)",
                     },
                     "offset": {
                         "selector": {
@@ -167,6 +168,7 @@ def _model_schema(defaults: dict) -> vol.Schema:
                             }
                         },
                         "required": True,
+                        "label": "Offset (kW)",
                     },
                 },
             )

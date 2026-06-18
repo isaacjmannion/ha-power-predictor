@@ -253,9 +253,12 @@ class PowerPredictorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         predictions: list[dict[str, Any]] = []
         for i, (_, row) in enumerate(df_future.iterrows()):
-            # Add the configured per-hour offset before clamping so min/max_power
-            # still bound the published value.
-            offset = hour_offsets.get(int(row["hour"]), 0.0)
+            # Add the configured offset before clamping so min/max_power still
+            # bound the published value. Match on the LOCAL hour-of-day so an
+            # offset for e.g. hour 13 lands at 1 pm on the user's clock — the same
+            # local time the forecast is displayed in (sensor.py shows local time).
+            local_hour = dt_util.as_local(row["timestamp"]).hour
+            offset = hour_offsets.get(local_hour, 0.0)
             value = min(max_power, max(min_power, raw_preds[i] + offset))
             predictions.append(
                 {

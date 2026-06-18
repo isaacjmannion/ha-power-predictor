@@ -32,7 +32,7 @@
           "peak_quantile": "Peak Period Quantile",
           "offpeak_quantile": "Off-Peak Quantile",
           "max_forecast_hours": "Max Forecast Hours",
-          "hour_offsets": "Hourly Offsets (kW)"
+          "hour_offsets": "Hour-of-day offsets"
         },
         "data_description": {
           "min_power": "Clamp predicted values to at least this value in kW (0 = no minimum beyond zero) Set around you min overnight usage.",
@@ -46,7 +46,7 @@
           "peak_quantile": "Quantile applied during peak hours.",
           "offpeak_quantile": "Quantile applied during off-peak hours.",
           "max_forecast_hours": "Maximum hours to forecast into the future (48–168 hours / 2-7 days). Note: Forecasts beyond weather data availability will use historical average temperature.",
-          "hour_offsets": "Optional fixed kW added to the forecast for specific hours of the day (e.g. EV charging or a pool pump). Add a row per hour you want to adjust; omitted hours get no offset. Hours use the same (UTC-based) convention as the peak period."
+          "hour_offsets": "Add a fixed kW offset at a chosen hour of the day, in local time: set the hour (0-23) and the kW to add — e.g. hour 13 adds the offset at 1 pm every day (good for EV charging or a pool pump). Hours not listed are unchanged; offsets may be negative and are still bounded by Min/Max Predicted Power."
         }
       }
     },
@@ -75,7 +75,7 @@
           "peak_quantile": "Peak Period Quantile",
           "offpeak_quantile": "Off-Peak Quantile",
           "max_forecast_hours": "Max Forecast Hours",
-          "hour_offsets": "Hourly Offsets (kW)"
+          "hour_offsets": "Hour-of-day offsets"
         }
       }
     }
