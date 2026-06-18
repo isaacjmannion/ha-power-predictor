@@ -380,7 +380,17 @@ def _build_future_df(
                 # Naive datetimes are assumed to be in HA's local timezone (not UTC)
                 # This handles integrations like BoM that provide timezone-naive forecasts
                 ha_tz = dt_util.get_default_time_zone()
-                dt = dt.tz_localize(ha_tz)
+                # Resolve DST transitions explicitly so localization never raises:
+                #   ambiguous=False           -> pick standard (non-DST) time on the
+                #                                repeated fall-back hour
+                #   nonexistent="shift_forward" -> shift a spring-forward gap time to the
+                #                                next valid instant
+                # Without these, the repeated/skipped hour raises AmbiguousTimeError /
+                # NonExistentTimeError, which are NOT caught by the except below and would
+                # crash the whole update at the DST changeover.
+                dt = dt.tz_localize(
+                    ha_tz, ambiguous=False, nonexistent="shift_forward"
+                )
             # Convert to the working timezone (derived from historical data)
             dt = dt.tz_convert(tz) if tz else dt
             dt = dt.replace(minute=0, second=0, microsecond=0)
