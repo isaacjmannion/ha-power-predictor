@@ -36,14 +36,14 @@ ENTRY_DATA = {
 }
 
 
-async def test_user_step_shows_form(hass):
+async def test_user_step_shows_form(recorder_mock, hass):
     """The first config step renders the entity-selection form."""
     result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
     assert result["type"] == FlowResultType.FORM
     assert result["step_id"] == "user"
 
 
-async def test_options_flow_form_renders(hass):
+async def test_options_flow_form_renders(recorder_mock, hass):
     """The options form builds — this constructs the hour-offsets ObjectSelector."""
     entry = MockConfigEntry(domain=DOMAIN, data=ENTRY_DATA)
     entry.add_to_hass(hass)
@@ -52,7 +52,7 @@ async def test_options_flow_form_renders(hass):
     assert result["step_id"] == "init"
 
 
-async def test_options_flow_saves_hour_offsets(hass):
+async def test_options_flow_saves_hour_offsets(recorder_mock, hass):
     """Submitting hour offsets through the options flow stores them on the entry."""
     entry = MockConfigEntry(domain=DOMAIN, data=ENTRY_DATA)
     entry.add_to_hass(hass)
