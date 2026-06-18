@@ -100,7 +100,7 @@ def _model_schema(defaults: dict) -> vol.Schema:
             CONF_UPDATE_INTERVAL_MINUTES,
             default=_d(CONF_UPDATE_INTERVAL_MINUTES, DEFAULT_UPDATE_INTERVAL_MINUTES),
         ): selector.NumberSelector(
-            selector.NumberSelectorConfig(min=15, max=1440, step=15, mode="box")
+            selector.NumberSelectorConfig(min=5, max=1440, step=5, mode="box")
         ),
         vol.Required(
             CONF_N_POWER_LAGS,
@@ -155,6 +155,7 @@ def _model_schema(defaults: dict) -> vol.Schema:
                     "hour": {
                         "selector": {"number": {"min": 0, "max": 23, "step": 1, "mode": "box"}},
                         "required": True,
+                        "label": "Hour of day (0-23, local time)",
                     },
                     "offset": {
                         "selector": {
@@ -167,6 +168,7 @@ def _model_schema(defaults: dict) -> vol.Schema:
                             }
                         },
                         "required": True,
+                        "label": "Offset (kW)",
                     },
                 },
             )
