@@ -1,0 +1,55 @@
+name: Validate
+
+# CI: runs on every push/PR to main, once a day on a schedule (to catch
+# breaking changes in the upstream HACS/hassfest validators even when we
+# aren't committing), and on demand via the Actions tab.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  hassfest:
+    # Home Assistant's official validator for the integration manifest.
+    name: Hassfest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: home-assistant/actions/hassfest@master
+
+  hacs:
+    # Checks the repository is correctly structured for HACS distribution.
+    name: HACS
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hacs/action@main
+        with:
+          category: integration
+          # We are not registered in the Home Assistant brands repo, so skip
+          # that specific check (icons ship in the integration's brand/ folder).
+          ignore: brands
+
+  version-sync:
+    # Fails the build if manifest.json and hacs.json report different versions,
+    # preventing the two files from silently drifting apart.
+    name: Version sync
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compare manifest.json and hacs.json versions
+        shell: bash
+        run: |
+          m=$(jq -r '.version' custom_components/ha_power_predictor/manifest.json)
+          h=$(jq -r '.version' hacs.json)
+          echo "manifest.json=$m  hacs.json=$h"
+          if [ "$m" != "$h" ]; then
+            echo "::error::Version drift: manifest.json=$m hacs.json=$h"
+            exit 1
+          fi
