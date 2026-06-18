@@ -4,7 +4,6 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
 
 permissions: {}
 
@@ -24,3 +23,20 @@ jobs:
         run: pip install pytest "numpy>=1.24.0" "pandas>=2.0.0"
       - name: Run pure tests
         run: pytest tests/pure -v
+
+  harness:
+    # Loads the integration under a real Home Assistant via
+    # pytest-homeassistant-custom-component, so it exercises the config/options
+    # flows (incl. the hour-offsets ObjectSelector). Pinned to HA 2026.6.3 /
+    # Python 3.14 in requirements-test.txt.
+    name: HA harness tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Install test requirements
+        run: pip install -r requirements-test.txt
+      - name: Run harness tests
+        run: pytest tests/ha -v --asyncio-mode=auto

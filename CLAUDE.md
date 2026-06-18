@@ -36,6 +36,8 @@ README.md              # user-facing docs (install, config, dashboard example)
 images/                # README screenshots and banners
 pyproject.toml         # ruff (lint) + pytest config
 tests/pure/            # pytest suite for the HA-independent modules
+tests/ha/              # HA-harness tests (pytest-homeassistant-custom-component)
+requirements-test.txt  # pinned HA + PHACC for the harness job
 .github/workflows/     # CI/CD: validate.yml, lint.yml, test.yml, release.yml
 ```
 
@@ -108,7 +110,10 @@ and the **pytest** suite (`test.yml`). Reproduce them locally:
 
 - **Lint:** `ruff check .` (config in `pyproject.toml`; lenient set `E/F/W/I`).
 - **Tests:** `pytest tests/pure` (needs only `pytest`, `numpy`, `pandas` — the
-  pure modules import no Home Assistant). HA-harness tests are not set up yet.
+  pure modules import no Home Assistant). `pytest tests/ha` runs the HA-harness
+  tests under `pytest-homeassistant-custom-component` (pinned in
+  `requirements-test.txt`, Python 3.14); they import the integration under real
+  Home Assistant. CI runs both as separate jobs in `test.yml`.
 - **JSON validity** for `manifest.json`, `hacs.json`, `strings.json`,
   `translations/en.json` (e.g. `python -m json.tool <file>`).
 - **Manual run:** copy `custom_components/ha_power_predictor/` into a Home

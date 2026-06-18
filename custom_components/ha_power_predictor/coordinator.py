@@ -32,6 +32,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_HISTORY_DAYS,
+    CONF_HOUR_OFFSETS,
     CONF_MAX_FORECAST_HOURS,
     CONF_MAX_POWER,
     CONF_MIN_POWER,
@@ -46,6 +47,7 @@ from .const import (
     CONF_UPDATE_INTERVAL_MINUTES,
     CONF_WEATHER_FORECAST_ENTITY,
     DEFAULT_HISTORY_DAYS,
+    DEFAULT_HOUR_OFFSETS,
     DEFAULT_MAX_FORECAST_HOURS,
     DEFAULT_MAX_POWER,
     DEFAULT_MIN_POWER,
@@ -59,7 +61,12 @@ from .const import (
     DOMAIN,
     MIN_TRAINING_SAMPLES,
 )
-from .data_processing import add_lagged_features, get_default_features, process_ha_statistics
+from .data_processing import (
+    add_lagged_features,
+    get_default_features,
+    normalize_hour_offsets,
+    process_ha_statistics,
+)
 from .models import QuantileRegressionModel, predict_iterative
 
 _LOGGER = logging.getLogger(__name__)
@@ -105,6 +112,7 @@ class PowerPredictorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         n_power_lags: int = int(cfg.get(CONF_N_POWER_LAGS, DEFAULT_N_POWER_LAGS))
         n_temp_lags: int = int(cfg.get(CONF_N_TEMP_LAGS, DEFAULT_N_TEMP_LAGS))
         max_forecast_hours: int = int(cfg.get(CONF_MAX_FORECAST_HOURS, DEFAULT_MAX_FORECAST_HOURS))
+        hour_offsets = normalize_hour_offsets(cfg.get(CONF_HOUR_OFFSETS, DEFAULT_HOUR_OFFSETS))
 
         min_power: float = float(cfg.get(CONF_MIN_POWER, DEFAULT_MIN_POWER))
         max_power: float = float(cfg.get(CONF_MAX_POWER, DEFAULT_MAX_POWER))
@@ -243,13 +251,21 @@ class PowerPredictorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         raw_preds: np.ndarray = future_result["predictions"]
 
-        predictions: list[dict[str, Any]] = [
-            {
-                "timestamp": row["timestamp"].isoformat(),
-                "predicted": round(float(min(max_power, max(min_power, raw_preds[i]))), 3),
-            }
-            for i, (_, row) in enumerate(df_future.iterrows())
-        ]
+        predictions: list[dict[str, Any]] = []
+        for i, (_, row) in enumerate(df_future.iterrows()):
+            # Add the configured offset before clamping so min/max_power still
+            # bound the published value. Match on the LOCAL hour-of-day so an
+            # offset for e.g. hour 13 lands at 1 pm on the user's clock — the same
+            # local time the forecast is displayed in (sensor.py shows local time).
+            local_hour = dt_util.as_local(row["timestamp"]).hour
+            offset = hour_offsets.get(local_hour, 0.0)
+            value = min(max_power, max(min_power, raw_preds[i] + offset))
+            predictions.append(
+                {
+                    "timestamp": row["timestamp"].isoformat(),
+                    "predicted": round(float(value), 3),
+                }
+            )
 
         _LOGGER.info(
             "Pipeline complete — %d predictions from %s to %s  (trained on %d samples)",

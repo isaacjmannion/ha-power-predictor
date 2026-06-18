@@ -1,0 +1,12 @@
+# Test dependencies for the HA-harness job (tests/ha).
+#
+# pytest-homeassistant-custom-component pins its OWN pytest (==9.0.3) and ships
+# the Home Assistant version it targets, so we must NOT pin pytest ourselves
+# (doing so caused a ResolutionImpossible conflict). Bump HA + PHACC together as
+# a matching pair (this pair targets HA 2026.6.3 and needs Python 3.14).
+# numpy/pandas mirror the integration's runtime requirements so the coordinator/
+# data_processing modules import cleanly.
+numpy>=1.24.0
+pandas>=2.0.0
+homeassistant==2026.6.3
+pytest-homeassistant-custom-component==0.13.339
