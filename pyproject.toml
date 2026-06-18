@@ -12,3 +12,5 @@ select = ["E", "F", "W", "I"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Put the repo root on sys.path so harness tests can `import custom_components...`.
+pythonpath = ["."]
