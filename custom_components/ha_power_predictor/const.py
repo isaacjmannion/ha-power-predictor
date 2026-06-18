@@ -20,6 +20,7 @@ CONF_UPDATE_INTERVAL_MINUTES = "update_interval_minutes"
 CONF_MIN_POWER = "min_power"
 CONF_MAX_POWER = "max_power"
 CONF_MAX_FORECAST_HOURS = "max_forecast_hours"
+CONF_HOUR_OFFSETS = "hour_offsets"
 
 # Defaults
 DEFAULT_INTEGRATION_NAME = "Power Predictor"
@@ -34,6 +35,7 @@ DEFAULT_UPDATE_INTERVAL_MINUTES = 10
 DEFAULT_MIN_POWER = 0.5
 DEFAULT_MAX_POWER = 15.0
 DEFAULT_MAX_FORECAST_HOURS = 48  # 2 days
+DEFAULT_HOUR_OFFSETS: list = []  # rows of {"hour": int, "offset": float kW}
 
 # Pipeline constants
 MIN_TRAINING_SAMPLES = 24  # 1 day of hourly statistics

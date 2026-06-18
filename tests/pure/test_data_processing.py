@@ -85,3 +85,34 @@ def test_add_lagged_features_shifts_and_drops_leading_rows():
 
 def test_get_default_features_exact_order():
     assert dp.get_default_features() == ["year", "month", "day_of_week", "hour", "temperature"]
+
+
+def test_normalize_hour_offsets_list_of_rows():
+    raw = [{"hour": 18, "offset": 0.8}, {"hour": 3, "offset": -0.3}]
+    assert dp.normalize_hour_offsets(raw) == {18: 0.8, 3: -0.3}
+
+
+def test_normalize_hour_offsets_dict_form():
+    assert dp.normalize_hour_offsets({"18": 0.8, 3: -0.3}) == {18: 0.8, 3: -0.3}
+
+
+def test_normalize_hour_offsets_duplicate_hour_last_wins():
+    raw = [{"hour": 5, "offset": 1.0}, {"hour": 5, "offset": 2.5}]
+    assert dp.normalize_hour_offsets(raw) == {5: 2.5}
+
+
+def test_normalize_hour_offsets_drops_out_of_range_and_malformed():
+    raw = [
+        {"hour": 24, "offset": 1.0},   # hour out of range
+        {"hour": -1, "offset": 1.0},   # hour out of range
+        {"hour": 9, "offset": "x"},    # non-numeric offset
+        {"offset": 1.0},               # missing hour
+        {"hour": 10, "offset": 2.0},   # valid
+    ]
+    assert dp.normalize_hour_offsets(raw) == {10: 2.0}
+
+
+def test_normalize_hour_offsets_empty_and_none():
+    assert dp.normalize_hour_offsets([]) == {}
+    assert dp.normalize_hour_offsets(None) == {}
+    assert dp.normalize_hour_offsets({}) == {}

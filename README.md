@@ -79,8 +79,24 @@ Tune the model behaviour via **Settings → Devices & Services → HA Power Pred
 | `Peak Quantile` | Quantile applied during peak hours | 0.75 |
 | `Off-Peak Quantile` | Quantile applied during off-peak hours | 0.50 |
 | `Max Forecast Hours` | Maximum hours to forecast (48–168 hours / 2-7 days) | 48 |
+| `Hour-of-day Offsets` | Fixed kW added at chosen hours of the day, local time (see [Hour-of-day Offsets](#hour-of-day-offsets)) | _(none)_ |
 
 > **Note**: Forecasts beyond weather forecast availability (typically 2-3 days) will use historical average temperature and may have reduced accuracy.
+
+### Hour-of-day Offsets
+
+If a known recurring load isn't captured well by the model — an EV charging overnight, a pool pump on a timer — add a **fixed kW offset at a specific hour of the day** (local clock time). Under **Configure**, add a row giving the hour (0–23) and the kW to add; the offset is applied at that hour **every day**. Offsets may be negative, hours you don't list are left unchanged, and the result is still bounded by the Min/Max Predicted Power clamp.
+
+Example — add 7 kW while an EV charges from 1 am to 4 am:
+
+| Hour of day | Offset (kW) |
+|-------------|-------------|
+| 1 | 7 |
+| 2 | 7 |
+| 3 | 7 |
+| 4 | 7 |
+
+> Hours are **local clock time** — e.g. hour 13 applies at 1 pm every day.
 
 ---
 
@@ -202,7 +218,7 @@ series:
 
 ## Requirements
 
-- Home Assistant **2024.1** or newer
+- Home Assistant **2025.7** or newer (the hourly-offset editor uses the object-selector row form introduced in 2025.7)
 - The power and temperature entities must have **long-term statistics** enabled (recorder integration, statistics enabled for the entity)
 - A weather entity providing an **hourly forecast**
 

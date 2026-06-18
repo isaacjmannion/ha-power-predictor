@@ -18,6 +18,7 @@ from homeassistant.helpers import selector
 
 from .const import (
     CONF_HISTORY_DAYS,
+    CONF_HOUR_OFFSETS,
     CONF_INTEGRATION_NAME,
     CONF_MAX_FORECAST_HOURS,
     CONF_MAX_POWER,
@@ -143,6 +144,35 @@ def _model_schema(defaults: dict) -> vol.Schema:
         ): selector.NumberSelector(
             selector.NumberSelectorConfig(min=48, max=MAX_FORECAST_HOURS_LIMIT, step=24, mode="box")
         ),
+        vol.Optional(
+            CONF_HOUR_OFFSETS,
+            default=_d(CONF_HOUR_OFFSETS, []),
+        ): selector.ObjectSelector(
+            selector.ObjectSelectorConfig(
+                multiple=True,
+                label_field="hour",
+                fields={
+                    "hour": {
+                        "selector": {"number": {"min": 0, "max": 23, "step": 1, "mode": "box"}},
+                        "required": True,
+                        "label": "Hour of day (0-23, local time)",
+                    },
+                    "offset": {
+                        "selector": {
+                            "number": {
+                                "min": -50,
+                                "max": 50,
+                                "step": 0.1,
+                                "mode": "box",
+                                "unit_of_measurement": "kW",
+                            }
+                        },
+                        "required": True,
+                        "label": "Offset (kW)",
+                    },
+                },
+            )
+        ),
     })
 
 
@@ -181,13 +211,17 @@ class PowerPredictorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict = {}
 
         if user_input is not None:
-            data = {**self._entity_data, **_coerce_numbers(user_input)}
-            title = self._entity_data.get(CONF_INTEGRATION_NAME, DEFAULT_INTEGRATION_NAME)
-            return self.async_create_entry(title=title, data=data)
+            error = _hour_offsets_error(user_input)
+            if error:
+                errors["base"] = error
+            else:
+                data = {**self._entity_data, **_coerce_numbers(user_input)}
+                title = self._entity_data.get(CONF_INTEGRATION_NAME, DEFAULT_INTEGRATION_NAME)
+                return self.async_create_entry(title=title, data=data)
 
         return self.async_show_form(
             step_id="model",
-            data_schema=_model_schema({}),
+            data_schema=_model_schema(user_input or {}),
             errors=errors,
         )
 
@@ -220,15 +254,20 @@ class PowerPredictorOptionsFlow(config_entries.OptionsFlow):
         user_input: dict | None = None,
     ) -> config_entries.FlowResult:
         """Single options step — all model parameters on one screen."""
+        errors: dict = {}
         if user_input is not None:
-            return self.async_create_entry(title="", data=_coerce_numbers(user_input))
+            error = _hour_offsets_error(user_input)
+            if not error:
+                return self.async_create_entry(title="", data=_coerce_numbers(user_input))
+            errors["base"] = error
 
-        # Pre-populate with existing values (options override data)
-        current = {**self._config_entry.data, **self._config_entry.options}
+        # Pre-populate with existing values (options override data, then this submission)
+        current = {**self._config_entry.data, **self._config_entry.options, **(user_input or {})}
 
         return self.async_show_form(
             step_id="init",
             data_schema=_model_schema(current),
+            errors=errors,
         )
 
 
@@ -248,3 +287,23 @@ def _coerce_numbers(data: dict) -> dict:
         CONF_MAX_FORECAST_HOURS,
     }
     return {k: int(v) if k in int_fields else v for k, v in data.items()}
+
+
+def _hour_offsets_error(user_input: dict) -> str | None:
+    """Validate the hour-offset rows; return an error key if invalid, else None."""
+    raw = user_input.get(CONF_HOUR_OFFSETS)
+    if not raw:
+        return None
+    if not isinstance(raw, list):
+        return "invalid_hour_offsets"
+    for entry in raw:
+        if not isinstance(entry, dict):
+            return "invalid_hour_offsets"
+        try:
+            hour = int(entry.get("hour"))
+            float(entry.get("offset"))
+        except (TypeError, ValueError):
+            return "invalid_hour_offsets"
+        if not 0 <= hour <= 23:
+            return "invalid_hour_offsets"
+    return None

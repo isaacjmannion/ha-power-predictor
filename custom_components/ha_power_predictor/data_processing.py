@@ -204,3 +204,39 @@ def get_default_features() -> list[str]:
     the configured n_power_lags and n_temp_lags values.
     """
     return ["year", "month", "day_of_week", "hour", "temperature"]
+
+
+def normalize_hour_offsets(raw: Any) -> dict[int, float]:
+    """
+    Normalize the configured hourly offsets into a {hour: offset} mapping.
+
+    Accepts the config ObjectSelector output — a list of {"hour": int,
+    "offset": float} rows — or a plain {hour: offset} mapping. Hours are coerced
+    to ints kept in 0–23 and offsets to floats; the last value wins when an hour
+    repeats, and malformed or out-of-range entries are silently dropped. Returns
+    an empty dict for empty/None input.
+    """
+    if not raw:
+        return {}
+
+    if isinstance(raw, dict):
+        items = list(raw.items())
+    elif isinstance(raw, (list, tuple)):
+        items = [
+            (entry.get("hour"), entry.get("offset"))
+            for entry in raw
+            if isinstance(entry, dict)
+        ]
+    else:
+        return {}
+
+    offsets: dict[int, float] = {}
+    for hour_raw, offset_raw in items:
+        try:
+            hour = int(hour_raw)
+            offset = float(offset_raw)
+        except (TypeError, ValueError):
+            continue
+        if 0 <= hour <= 23:
+            offsets[hour] = offset  # last value wins on duplicate hours
+    return offsets
