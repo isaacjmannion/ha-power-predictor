@@ -34,6 +34,9 @@ hacs.json              # HACS metadata
 repository.yaml        # HACS repository descriptor
 README.md              # user-facing docs (install, config, dashboard example)
 images/                # README screenshots and banners
+pyproject.toml         # ruff (lint) + pytest config
+tests/pure/            # pytest suite for the HA-independent modules
+.github/workflows/     # CI/CD: validate.yml, lint.yml, test.yml, release.yml
 ```
 
 See `custom_components/ha_power_predictor/CLAUDE.md` for module-level internals
@@ -99,23 +102,24 @@ just calls `coordinator.async_request_refresh()` on press.
 
 ## Validating changes
 
-This repo has **no test suite, no linter config, and no CI** committed. Validate
-changes the way an HA custom component is normally validated:
+CI runs automatically on every push/PR to `main` (see `.github/workflows/`):
+**hassfest** + **HACS** validation (`validate.yml`), **ruff** lint (`lint.yml`),
+and the **pytest** suite (`test.yml`). Reproduce them locally:
 
-- **Syntax check** every changed module:
-  `python -m py_compile custom_components/ha_power_predictor/*.py`
+- **Lint:** `ruff check .` (config in `pyproject.toml`; lenient set `E/F/W/I`).
+- **Tests:** `pytest tests/pure` (needs only `pytest`, `numpy`, `pandas` — the
+  pure modules import no Home Assistant). HA-harness tests are not set up yet.
 - **JSON validity** for `manifest.json`, `hacs.json`, `strings.json`,
   `translations/en.json` (e.g. `python -m json.tool <file>`).
 - **Manual run:** copy `custom_components/ha_power_predictor/` into a Home
   Assistant `config/custom_components/` directory, restart HA, add the
   integration via the UI, and watch the logs (the coordinator logs each pipeline
   stage at `debug`/`info`).
-- Home Assistant's own `hassfest` and HACS validation are the canonical checks
-  for integrations like this, even though no GitHub Action is configured here.
 
-There is no automated way to verify the model output without a live HA instance
-that has recorder statistics — reason about model changes from the code and the
-docstrings in `models.py`.
+`hassfest` and the HACS action are the canonical structural checks and now run
+in CI. There is still no automated way to verify model *output* without a live
+HA instance with recorder statistics — reason about model changes from the code
+and the docstrings in `models.py`.
 
 ## Releasing / bumping the version
 
@@ -124,8 +128,14 @@ read it). `hacs.json` must NOT carry a `version` key — the HACS validation
 action rejects it. When releasing:
 
 1. Bump `version` in `manifest.json`.
-2. Add a section to the Changelog in `README.md`.
-3. Tag/release on GitHub (HACS serves the latest GitHub release).
+2. Add a `### X.Y.Z — title` entry to the Changelog in `README.md`.
+3. PR → confirm CI is green → merge to `main`.
+4. Publish a GitHub release with tag `vX.Y.Z` (use the `v` prefix consistently).
+   `release.yml` then stamps the tag's version into the manifest and attaches
+   `ha_power_predictor.zip` to the release. HACS serves the latest release.
+
+> `zip_release`/`filename` in `hacs.json` make HACS install from that zip asset;
+> only enable them once a release actually carries the zip.
 
 ## Things that must stay consistent
 
