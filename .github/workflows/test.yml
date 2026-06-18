@@ -1,0 +1,26 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions: {}
+
+jobs:
+  pure:
+    # Fast job: the model + data-processing modules depend only on numpy/pandas,
+    # so they are tested with no Home Assistant install. (See tests/pure/conftest.py
+    # for how they're imported without loading the HA-dependent package __init__.)
+    name: Pure module tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install pytest "numpy>=1.24.0" "pandas>=2.0.0"
+      - name: Run pure tests
+        run: pytest tests/pure -v
