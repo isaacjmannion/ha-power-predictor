@@ -241,9 +241,12 @@ series:
 
 ## Changelog
 
-### 0.2.2 — Daylight-saving fix
+### 0.2.2 — Hour-of-day offsets, faster updates, DST fix
+- **New — Hour-of-day offsets:** add a fixed kW offset at chosen hours of the day (local clock time) to capture known recurring loads — e.g. +7 kW while an EV charges overnight. Configured as rows of `{hour, offset}`; the offset is applied at that hour every day and stays bounded by the Min/Max Predicted Power clamp.
+- Update interval can now be set as low as **5 minutes** (was 15).
 - Fixed a crash at daylight-saving transitions when localizing timezone-naive weather forecast timestamps (e.g. BoM): both the fall-back (repeated hour) and spring-forward (skipped hour) are now handled.
-- Developer tooling: added CI (hassfest, HACS, ruff, pytest) and release automation via GitHub Actions.
+- **Requires Home Assistant 2025.7 or newer** (the hour-of-day offset editor uses the object-selector row form introduced in 2025.7).
+- Developer tooling: added CI (hassfest, HACS, ruff, pytest + a Home Assistant harness job) and release automation via GitHub Actions.
 
 ### 0.2.1 — Extended forecast support
 - Added configurable extended forecast sensor with 2-7 day range
