@@ -1,16 +1,4 @@
 {
   "name": "HA Power Predictor",
-  "homeassistant": "2024.1.0",
-  "domain": "ha_power_predictor",
-  "version": "0.2.1",
-  "config_flow": true,
-  "dependencies": ["recorder"],
-  "requirements": [
-    "numpy>=1.24.0",
-    "pandas>=2.0.0"
-  ],
-  "iot_class": "local_polling",
-  "codeowners": ["@isaacjmannion"],
-  "documentation": "https://github.com/isaacjmannion/ha-power-predictor",
-  "issue_tracker": "https://github.com/isaacjmannion/ha-power-predictor/issues"
+  "homeassistant": "2024.1.0"
 }
