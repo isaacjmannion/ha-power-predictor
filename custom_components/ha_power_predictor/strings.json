@@ -33,7 +33,8 @@
           "peak_end": "Peak Period End Hour (0–23)",
           "peak_quantile": "Peak Period Quantile",
           "offpeak_quantile": "Off-Peak Quantile",
-          "max_forecast_hours": "Max Forecast Hours"
+          "max_forecast_hours": "Max Forecast Hours",
+          "hour_offsets": "Hourly Offsets (kW)"
         },
         "data_description": {
           "min_power": "Clamp predicted values to at least this value in kW (0 = no minimum beyond zero) Set around you min overnight usage.",
@@ -48,15 +49,20 @@
           "peak_end": "Hour of day when the peak period ends (inclusive).",
           "peak_quantile": "Quantile applied during peak hours.",
           "offpeak_quantile": "Quantile applied during off-peak hours.",
-          "max_forecast_hours": "Maximum hours to forecast into the future (48–168 hours / 2-7 days). Note: Forecasts beyond weather data availability will use historical average temperature."
+          "max_forecast_hours": "Maximum hours to forecast into the future (48–168 hours / 2-7 days). Note: Forecasts beyond weather data availability will use historical average temperature.",
+          "hour_offsets": "Optional fixed kW added to the forecast for specific hours of the day (e.g. EV charging or a pool pump). Add a row per hour you want to adjust; omitted hours get no offset. Hours use the same (UTC-based) convention as the peak period."
         }
       }
     },
     "error": {
-      "cannot_connect": "Failed to connect to Home Assistant recorder."
+      "cannot_connect": "Failed to connect to Home Assistant recorder.",
+      "invalid_hour_offsets": "Each offset row needs an hour between 0 and 23 and a numeric kW value."
     }
   },
   "options": {
+    "error": {
+      "invalid_hour_offsets": "Each offset row needs an hour between 0 and 23 and a numeric kW value."
+    },
     "step": {
       "init": {
         "title": "Model Parameters",
@@ -74,7 +80,8 @@
           "peak_end": "Peak Period End Hour",
           "peak_quantile": "Peak Period Quantile",
           "offpeak_quantile": "Off-Peak Quantile",
-          "max_forecast_hours": "Max Forecast Hours"
+          "max_forecast_hours": "Max Forecast Hours",
+          "hour_offsets": "Hourly Offsets (kW)"
         }
       }
     }
