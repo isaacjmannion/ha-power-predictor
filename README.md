@@ -225,6 +225,10 @@ series:
 
 ## Changelog
 
+### 0.2.2 — Daylight-saving fix
+- Fixed a crash at daylight-saving transitions when localizing timezone-naive weather forecast timestamps (e.g. BoM): both the fall-back (repeated hour) and spring-forward (skipped hour) are now handled.
+- Developer tooling: added CI (hassfest, HACS, ruff, pytest) and release automation via GitHub Actions.
+
 ### 0.2.1 — Extended forecast support
 - Added configurable extended forecast sensor with 2-7 day range
 - New `sensor.power_prediction_extended` provides forecasts up to 168 hours (7 days)
