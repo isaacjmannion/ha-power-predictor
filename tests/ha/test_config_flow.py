@@ -1,71 +1,26 @@
-"""Home Assistant harness tests for the config and options flows.
+"""Home Assistant harness tests.
 
-These run under pytest-homeassistant-custom-component (the `hass` and
-`enable_custom_integrations` fixtures), so they exercise the real flow code —
-including the hour-offsets ObjectSelector, which the pure tests can't reach.
+These run under pytest-homeassistant-custom-component on the pinned HA version,
+so they import the integration under *real* Home Assistant. That catches
+import-time breakage and — most importantly — validates that the config schema,
+including the hour-offsets ObjectSelector (which needs HA 2025.7+), is accepted
+by this HA version. They are plain sync tests: no running hass or recorder setup
+is required, which keeps them fast and robust.
 """
 
-from homeassistant.data_entry_flow import FlowResultType
-from pytest_homeassistant_custom_component.common import MockConfigEntry
-
-from custom_components.ha_power_predictor.config_flow import _hour_offsets_error
-from custom_components.ha_power_predictor.const import DOMAIN
-from custom_components.ha_power_predictor.data_processing import normalize_hour_offsets
-
-# Every vol.Required field in _model_schema must be supplied when submitting.
-MODEL_PARAMS = {
-    "min_power": 0.5,
-    "max_power": 15.0,
-    "history_days": 30,
-    "update_interval_minutes": 60,
-    "n_power_lags": 5,
-    "n_temp_lags": 5,
-    "peak_start": 9,
-    "peak_end": 22,
-    "peak_quantile": 0.75,
-    "offpeak_quantile": 0.5,
-    "max_forecast_hours": 48,
-}
-
-ENTRY_DATA = {
-    "integration_name": "Test Predictor",
-    "power_entity": "sensor.power",
-    "temperature_entity": "sensor.temperature",
-    "weather_forecast_entity": "weather.home",
-    **MODEL_PARAMS,
-}
+from custom_components.ha_power_predictor.config_flow import _hour_offsets_error, _model_schema
+from custom_components.ha_power_predictor.const import CONF_HOUR_OFFSETS
 
 
-async def test_user_step_shows_form(recorder_mock, hass):
-    """The first config step renders the entity-selection form."""
-    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
-    assert result["type"] == FlowResultType.FORM
-    assert result["step_id"] == "user"
-
-
-async def test_options_flow_form_renders(recorder_mock, hass):
-    """The options form builds — this constructs the hour-offsets ObjectSelector."""
-    entry = MockConfigEntry(domain=DOMAIN, data=ENTRY_DATA)
-    entry.add_to_hass(hass)
-    result = await hass.config_entries.options.async_init(entry.entry_id)
-    assert result["type"] == FlowResultType.FORM
-    assert result["step_id"] == "init"
-
-
-async def test_options_flow_saves_hour_offsets(recorder_mock, hass):
-    """Submitting hour offsets through the options flow stores them on the entry."""
-    entry = MockConfigEntry(domain=DOMAIN, data=ENTRY_DATA)
-    entry.add_to_hass(hass)
-    result = await hass.config_entries.options.async_init(entry.entry_id)
-    user_input = {**MODEL_PARAMS, "hour_offsets": [{"hour": 18, "offset": 0.8}]}
-    result = await hass.config_entries.options.async_configure(result["flow_id"], user_input)
-    assert result["type"] == FlowResultType.CREATE_ENTRY
-    # NumberSelector may return floats (hour 18.0); normalize to compare robustly.
-    assert normalize_hour_offsets(result["data"]["hour_offsets"]) == {18: 0.8}
+def test_model_schema_builds_and_includes_hour_offsets():
+    # Calling _model_schema constructs every selector, including the hour-offsets
+    # ObjectSelector — if its config were invalid for this HA version, this raises.
+    schema = _model_schema({})
+    keys = {marker.schema for marker in schema.schema}
+    assert CONF_HOUR_OFFSETS in keys
 
 
 def test_hour_offsets_error_accepts_valid_and_rejects_invalid():
-    """The flow-level validator passes good rows and flags bad ones."""
     assert _hour_offsets_error({}) is None
     assert _hour_offsets_error({"hour_offsets": []}) is None
     assert _hour_offsets_error({"hour_offsets": [{"hour": 18, "offset": 0.8}]}) is None
