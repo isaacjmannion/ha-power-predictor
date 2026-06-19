@@ -18,6 +18,7 @@ from homeassistant.helpers import selector
 
 from .const import (
     CONF_HISTORY_DAYS,
+    CONF_HOUR_HARMONICS,
     CONF_HOUR_OFFSETS,
     CONF_INTEGRATION_NAME,
     CONF_MAX_FORECAST_HOURS,
@@ -30,10 +31,15 @@ from .const import (
     CONF_PEAK_QUANTILE,
     CONF_PEAK_START,
     CONF_POWER_ENTITY,
+    CONF_REG_ALPHA,
     CONF_TEMPERATURE_ENTITY,
     CONF_UPDATE_INTERVAL_MINUTES,
     CONF_WEATHER_FORECAST_ENTITY,
+    CONF_WEIGHT_LAGS,
+    CONF_WEIGHT_TEMPERATURE,
+    CONF_WEIGHT_TIME,
     DEFAULT_HISTORY_DAYS,
+    DEFAULT_HOUR_HARMONICS,
     DEFAULT_INTEGRATION_NAME,
     DEFAULT_MAX_FORECAST_HOURS,
     DEFAULT_MAX_POWER,
@@ -44,7 +50,11 @@ from .const import (
     DEFAULT_PEAK_END,
     DEFAULT_PEAK_QUANTILE,
     DEFAULT_PEAK_START,
+    DEFAULT_REG_ALPHA,
     DEFAULT_UPDATE_INTERVAL_MINUTES,
+    DEFAULT_WEIGHT_LAGS,
+    DEFAULT_WEIGHT_TEMPERATURE,
+    DEFAULT_WEIGHT_TIME,
     DOMAIN,
     MAX_FORECAST_HOURS_LIMIT,
 )
@@ -137,6 +147,36 @@ def _model_schema(defaults: dict) -> vol.Schema:
             default=_d(CONF_OFFPEAK_QUANTILE, DEFAULT_OFFPEAK_QUANTILE),
         ): selector.NumberSelector(
             selector.NumberSelectorConfig(min=0.5, max=0.99, step=0.01, mode="slider")
+        ),
+        vol.Required(
+            CONF_HOUR_HARMONICS,
+            default=_d(CONF_HOUR_HARMONICS, DEFAULT_HOUR_HARMONICS),
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(min=0, max=3, step=1, mode="box")
+        ),
+        vol.Required(
+            CONF_REG_ALPHA,
+            default=_d(CONF_REG_ALPHA, DEFAULT_REG_ALPHA),
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(min=0.0, max=10.0, step=0.01, mode="box")
+        ),
+        vol.Required(
+            CONF_WEIGHT_TIME,
+            default=_d(CONF_WEIGHT_TIME, DEFAULT_WEIGHT_TIME),
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(min=0.0, max=5.0, step=0.1, mode="slider")
+        ),
+        vol.Required(
+            CONF_WEIGHT_TEMPERATURE,
+            default=_d(CONF_WEIGHT_TEMPERATURE, DEFAULT_WEIGHT_TEMPERATURE),
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(min=0.0, max=5.0, step=0.1, mode="slider")
+        ),
+        vol.Required(
+            CONF_WEIGHT_LAGS,
+            default=_d(CONF_WEIGHT_LAGS, DEFAULT_WEIGHT_LAGS),
+        ): selector.NumberSelector(
+            selector.NumberSelectorConfig(min=0.0, max=5.0, step=0.1, mode="slider")
         ),
         vol.Required(
             CONF_MAX_FORECAST_HOURS,
@@ -285,6 +325,7 @@ def _coerce_numbers(data: dict) -> dict:
         CONF_PEAK_START,
         CONF_PEAK_END,
         CONF_MAX_FORECAST_HOURS,
+        CONF_HOUR_HARMONICS,
     }
     return {k: int(v) if k in int_fields else v for k, v in data.items()}
 

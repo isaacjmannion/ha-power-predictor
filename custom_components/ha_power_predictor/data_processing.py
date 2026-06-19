@@ -12,6 +12,7 @@ import logging
 import time
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 _LOGGER = logging.getLogger(__name__)
@@ -196,14 +197,111 @@ def add_lagged_features(
     return df_out
 
 
-def get_default_features() -> list[str]:
-    """
-    Return the base feature list used by the model.
+def _hour_cyclical_names(hour_harmonics: int) -> list[str]:
+    """Column names for the sin/cos hour-of-day harmonics, in fixed order."""
+    names: list[str] = []
+    for k in range(1, hour_harmonics + 1):
+        names.append(f"hour_sin_{k}")
+        names.append(f"hour_cos_{k}")
+    return names
 
-    Lag feature names are appended dynamically by the coordinator based on
-    the configured n_power_lags and n_temp_lags values.
+
+def add_cyclical_features(df: pd.DataFrame, hour_harmonics: int = 2) -> pd.DataFrame:
     """
-    return ["year", "month", "day_of_week", "hour", "temperature"]
+    Append cyclical (sin/cos) encodings of the hour-of-day.
+
+    A single linear ``hour`` term can only describe a monotonic ramp across the
+    day, so it cannot represent the typical bimodal household load curve (a
+    morning and an evening peak). Encoding hour as ``hour_sin_k`` / ``hour_cos_k``
+    for k = 1..hour_harmonics gives the linear model a Fourier basis that *can*
+    bend into multiple daily peaks — this is the main lever for forecast
+    sharpness.
+
+    The raw ``hour`` column is left untouched: the coordinator still passes it
+    separately for peak/off-peak routing. Encoding is a pure function of
+    ``hour`` so historical and future frames encode identically by construction.
+
+    Args:
+        df:             DataFrame containing an integer ``hour`` column (0–23).
+        hour_harmonics: Number of harmonics (0 = no cyclical columns added).
+
+    Returns:
+        A copy of ``df`` with the cyclical columns appended, or ``df`` unchanged
+        when ``hour_harmonics <= 0``.
+    """
+    if hour_harmonics <= 0:
+        return df
+
+    df_out = df.copy()
+    hour = df_out["hour"].to_numpy(dtype=float)
+    for k in range(1, hour_harmonics + 1):
+        angle = 2.0 * np.pi * k * hour / 24.0
+        df_out[f"hour_sin_{k}"] = np.sin(angle)
+        df_out[f"hour_cos_{k}"] = np.cos(angle)
+    return df_out
+
+
+def get_default_features(hour_harmonics: int = 2) -> list[str]:
+    """
+    Return the base feature list used by the model, in column order.
+
+    With ``hour_harmonics > 0`` the linear ``hour`` term is replaced by
+    ``hour_sin_k`` / ``hour_cos_k`` cyclical columns (see ``add_cyclical_features``);
+    with ``hour_harmonics == 0`` the original linear ``hour`` term is kept.
+
+    Lag feature names (``power_lag_*``, ``temp_lag_*``) are appended dynamically
+    by the coordinator based on the configured n_power_lags and n_temp_lags.
+    """
+    features = ["year", "month", "day_of_week"]
+    if hour_harmonics > 0:
+        features += _hour_cyclical_names(hour_harmonics)
+    else:
+        features.append("hour")
+    features.append("temperature")
+    return features
+
+
+def build_feature_weights(
+    features: list[str],
+    group_weights: dict[str, float],
+) -> np.ndarray:
+    """
+    Expand per-group influence weights onto a per-column weight vector.
+
+    Groups:
+      - ``time``        — the hour features (``hour`` or ``hour_sin_*`` / ``hour_cos_*``)
+      - ``temperature`` — ``temperature`` and ``temp_lag_*``
+      - ``lags``        — ``power_lag_*``
+    Calendar columns (``year``, ``month``, ``day_of_week``) are always weight 1.0.
+
+    The weights are consumed by the model as a per-feature ridge penalty
+    (``reg_diag[j] = alpha / w_j**2``): a larger weight means a smaller penalty
+    and therefore *more* influence for that feature group. Missing groups
+    default to 1.0 (neutral). Note the weights only have a meaningful effect on
+    a standardized fit with a non-trivial ``alpha`` — see the model.
+
+    Args:
+        features:      Feature names in model column order.
+        group_weights: Mapping with optional keys ``time`` / ``temperature`` / ``lags``.
+
+    Returns:
+        1-D float array of length ``len(features)`` aligned to ``features``.
+    """
+    time_w = float(group_weights.get("time", 1.0))
+    temp_w = float(group_weights.get("temperature", 1.0))
+    lag_w = float(group_weights.get("lags", 1.0))
+
+    weights: list[float] = []
+    for feat in features:
+        if feat == "hour" or feat.startswith("hour_sin") or feat.startswith("hour_cos"):
+            weights.append(time_w)
+        elif feat == "temperature" or feat.startswith("temp_lag"):
+            weights.append(temp_w)
+        elif feat.startswith("power_lag"):
+            weights.append(lag_w)
+        else:
+            weights.append(1.0)
+    return np.asarray(weights, dtype=float)
 
 
 def normalize_hour_offsets(raw: Any) -> dict[int, float]:

@@ -55,8 +55,11 @@ interval) and on demand (the "Train Now" button). On each run
    entities over the last `history_days`.
 2. Fetches the hourly weather forecast via the `weather.get_forecasts` service.
 3. Processes the statistics into a feature DataFrame (`process_ha_statistics`).
-4. Adds auto-regressive lag features (`add_lagged_features`).
-5. Trains a `QuantileRegressionModel` (separate peak/off-peak models).
+4. Adds auto-regressive lag features (`add_lagged_features`) and cyclical
+   hour-of-day features (`add_cyclical_features`).
+5. Trains a `QuantileRegressionModel` (separate peak/off-peak models) on
+   standardized features, with a per-feature ridge penalty from the configured
+   influence weights (`build_feature_weights`).
 6. Computes in-sample fitted values + coverage % for charting.
 7. Builds a future feature matrix out to `max_forecast_hours` (`_build_future_df`).
 8. Generates predictions auto-regressively (`predict_iterative`), then adds any

@@ -41,6 +41,7 @@ def _fit_quantile_irls(
     alpha: float = 0.01,
     max_iter: int = 200,
     tol: float = 1e-6,
+    reg_weights: Optional[np.ndarray] = None,
 ) -> np.ndarray:
     """
     Fit a quantile regression model using IRLS.
@@ -54,6 +55,13 @@ def _fit_quantile_irls(
                   default). Applied to all coefficients except the intercept.
         max_iter: Maximum number of IRLS iterations.
         tol:      Convergence tolerance on max absolute coefficient change.
+        reg_weights: Optional per-feature influence weights, length n_features.
+                  When given, feature j's penalty becomes ``alpha / w_j**2`` — a
+                  larger weight means a smaller penalty and therefore more
+                  influence (equivalent, in predictions, to scaling column j by
+                  w_j under a uniform penalty). ``None`` keeps the uniform alpha
+                  penalty. Only meaningful when X is standardized and alpha is
+                  non-trivial.
 
     Returns:
         coeffs: 1-D array of length (n_features + 1). coeffs[0] is the
@@ -72,9 +80,16 @@ def _fit_quantile_irls(
     # -----------------------------------------------------------------------
     coeffs, *_ = np.linalg.lstsq(Xa, y, rcond=None)
 
-    # Regularisation diagonal: skip the intercept term (index 0).
+    # Regularisation diagonal: skip the intercept term (index 0). With
+    # per-feature weights, feature j's penalty is alpha / w_j**2 (a larger
+    # weight -> smaller penalty -> more influence). A small floor on the weight
+    # turns a 0 weight into a very large (finite) penalty, so the feature is
+    # driven to ~0 influence without an inf/NaN in the normal equations.
     reg_diag = np.full(p + 1, alpha)
     reg_diag[0] = 0.0
+    if reg_weights is not None:
+        w = np.maximum(np.abs(np.asarray(reg_weights, dtype=np.float64)), 1e-6)
+        reg_diag[1:] = alpha / (w ** 2)
 
     # A small floor prevents division-by-zero when a residual is exactly 0.
     _eps = 1e-8
@@ -163,7 +178,14 @@ class QuantileRegressionModel:
     numpy — no scipy or scikit-learn required.
     """
 
-    def __init__(self, quantile: float = 0.75, dynamic_config: Optional[Dict] = None):
+    def __init__(
+        self,
+        quantile: float = 0.75,
+        dynamic_config: Optional[Dict] = None,
+        alpha: float = 0.01,
+        feature_weights: Optional[np.ndarray] = None,
+        standardize: bool = False,
+    ):
         """
         Args:
             quantile: Quantile to predict (0.5–0.99).
@@ -172,15 +194,58 @@ class QuantileRegressionModel:
                 - peak_end:         Hour when peak period ends   (e.g. 22)
                 - peak_quantile:    Quantile for peak hours      (e.g. 0.75)
                 - offpeak_quantile: Quantile for off-peak hours  (e.g. 0.50)
+            alpha: L2 regularisation strength passed to the IRLS solver.
+            feature_weights: Optional per-feature influence weights (length =
+                n_features), applied as the per-feature ridge penalty
+                ``alpha / w_j**2``. Requires ``standardize=True`` and a
+                non-trivial ``alpha`` to have a meaningful, comparable effect.
+            standardize: When True, z-score the feature matrix on the training
+                statistics and reuse those stats at predict time. This makes the
+                uniform penalty act uniformly across features and is a
+                prerequisite for ``feature_weights`` to behave predictably.
         """
         self.quantile = quantile
         self.dynamic_config = dynamic_config
+        self.alpha = alpha
+        self.feature_weights = (
+            None if feature_weights is None
+            else np.asarray(feature_weights, dtype=np.float64)
+        )
+        self.standardize = standardize
+
+        # Standardization stats, fit on the training matrix (shared by the
+        # peak/off-peak sub-models so the future frame's scaling matches both).
+        self._mu: Optional[np.ndarray] = None
+        self._sigma: Optional[np.ndarray] = None
 
         # Fitted state: single model or per-period models.
         # Each entry is a coefficient vector from _fit_quantile_irls.
         self._coeffs: Optional[np.ndarray] = None
         self._coeffs_peak: Optional[np.ndarray] = None
         self._coeffs_offpeak: Optional[np.ndarray] = None
+
+    # ------------------------------------------------------------------
+    # Standardization
+    # ------------------------------------------------------------------
+
+    def _fit_scaler(self, X: np.ndarray) -> None:
+        """Fit standardization statistics on the training matrix (once)."""
+        if not self.standardize:
+            self._mu = None
+            self._sigma = None
+            return
+        self._mu = X.mean(axis=0)
+        sigma = X.std(axis=0)
+        # Constant columns (e.g. 'year' over a short window) have ~0 std; a
+        # floor of 1.0 keeps them at zero post-centering instead of exploding.
+        sigma[sigma < 1e-8] = 1.0
+        self._sigma = sigma
+
+    def _apply_scaler(self, X: np.ndarray) -> np.ndarray:
+        """Standardize a feature matrix with the stored training statistics."""
+        if not self.standardize or self._mu is None:
+            return X
+        return (X - self._mu) / self._sigma
 
     # ------------------------------------------------------------------
     # Training
@@ -200,20 +265,42 @@ class QuantileRegressionModel:
             y_train:     Training target vector.
             hours_train: Hour-of-day values, required for dynamic quantile.
         """
+        X_train = np.asarray(X_train, dtype=np.float64)
+        if (
+            self.feature_weights is not None
+            and self.feature_weights.shape[0] != X_train.shape[1]
+        ):
+            raise ValueError(
+                f"feature_weights length {self.feature_weights.shape[0]} does not "
+                f"match feature count {X_train.shape[1]}"
+            )
+
+        # Fit the scaler on the FULL training matrix, then standardize once so
+        # both peak/off-peak sub-models share the same scaling.
+        self._fit_scaler(X_train)
+        Xs = self._apply_scaler(X_train)
+
         if self.dynamic_config is not None and hours_train is not None:
             print("  - Training Dynamic Quantile Regression (IRLS)...")
-            self._train_dynamic(X_train, y_train, hours_train)
+            self._train_dynamic(Xs, y_train, hours_train)
         else:
             print(f"  - Training Quantile Regression (q={self.quantile:.2f}, IRLS)...")
-            self._coeffs = _fit_quantile_irls(X_train, y_train, self.quantile)
+            self._coeffs = _fit_quantile_irls(
+                Xs, y_train, self.quantile, self.alpha,
+                reg_weights=self.feature_weights,
+            )
 
     def _train_dynamic(
         self,
-        X_train: np.ndarray,
+        X_std: np.ndarray,
         y_train: np.ndarray,
         hours_train: np.ndarray,
     ) -> None:
-        """Train separate IRLS models for peak and off-peak hours."""
+        """Train separate IRLS models for peak and off-peak hours.
+
+        ``X_std`` is already standardized by ``train`` (the scaler is fit on the
+        full matrix so both sub-models and the future frame share one scaling).
+        """
         peak_start = self.dynamic_config['peak_start']
         peak_end = self.dynamic_config['peak_end']
         peak_quantile = self.dynamic_config['peak_quantile']
@@ -227,14 +314,16 @@ class QuantileRegressionModel:
             print(f"    - Peak hours ({peak_start}–{peak_end}): "
                   f"q={peak_quantile:.2f}, {n_peak} samples")
             self._coeffs_peak = _fit_quantile_irls(
-                X_train[peak_mask], y_train[peak_mask], peak_quantile
+                X_std[peak_mask], y_train[peak_mask], peak_quantile,
+                self.alpha, reg_weights=self.feature_weights,
             )
 
         if np.any(offpeak_mask):
             n_offpeak = int(np.sum(offpeak_mask))
             print(f"    - Off-peak hours: q={offpeak_quantile:.2f}, {n_offpeak} samples")
             self._coeffs_offpeak = _fit_quantile_irls(
-                X_train[offpeak_mask], y_train[offpeak_mask], offpeak_quantile
+                X_std[offpeak_mask], y_train[offpeak_mask], offpeak_quantile,
+                self.alpha, reg_weights=self.feature_weights,
             )
 
     # ------------------------------------------------------------------
@@ -256,6 +345,12 @@ class QuantileRegressionModel:
         Returns:
             Predicted values, shape (n_samples,).
         """
+        # Standardize with the stored TRAINING stats (no-op when standardize is
+        # off). Done here, on the raw matrix, so predict_iterative can keep
+        # writing raw-kW predictions back into the power-lag columns without
+        # any unit mismatch — the scaling is applied per call, after the lag
+        # write-backs, inside this method.
+        X = self._apply_scaler(np.asarray(X, dtype=np.float64))
         if self.dynamic_config is not None and hours is not None:
             return self._predict_dynamic(X, hours)
         if self._coeffs is None:

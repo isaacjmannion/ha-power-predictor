@@ -32,6 +32,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_HISTORY_DAYS,
+    CONF_HOUR_HARMONICS,
     CONF_HOUR_OFFSETS,
     CONF_MAX_FORECAST_HOURS,
     CONF_MAX_POWER,
@@ -43,10 +44,15 @@ from .const import (
     CONF_PEAK_QUANTILE,
     CONF_PEAK_START,
     CONF_POWER_ENTITY,
+    CONF_REG_ALPHA,
     CONF_TEMPERATURE_ENTITY,
     CONF_UPDATE_INTERVAL_MINUTES,
     CONF_WEATHER_FORECAST_ENTITY,
+    CONF_WEIGHT_LAGS,
+    CONF_WEIGHT_TEMPERATURE,
+    CONF_WEIGHT_TIME,
     DEFAULT_HISTORY_DAYS,
+    DEFAULT_HOUR_HARMONICS,
     DEFAULT_HOUR_OFFSETS,
     DEFAULT_MAX_FORECAST_HOURS,
     DEFAULT_MAX_POWER,
@@ -57,12 +63,18 @@ from .const import (
     DEFAULT_PEAK_END,
     DEFAULT_PEAK_QUANTILE,
     DEFAULT_PEAK_START,
+    DEFAULT_REG_ALPHA,
     DEFAULT_UPDATE_INTERVAL_MINUTES,
+    DEFAULT_WEIGHT_LAGS,
+    DEFAULT_WEIGHT_TEMPERATURE,
+    DEFAULT_WEIGHT_TIME,
     DOMAIN,
     MIN_TRAINING_SAMPLES,
 )
 from .data_processing import (
+    add_cyclical_features,
     add_lagged_features,
+    build_feature_weights,
     get_default_features,
     normalize_hour_offsets,
     process_ha_statistics,
@@ -113,6 +125,13 @@ class PowerPredictorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         n_temp_lags: int = int(cfg.get(CONF_N_TEMP_LAGS, DEFAULT_N_TEMP_LAGS))
         max_forecast_hours: int = int(cfg.get(CONF_MAX_FORECAST_HOURS, DEFAULT_MAX_FORECAST_HOURS))
         hour_offsets = normalize_hour_offsets(cfg.get(CONF_HOUR_OFFSETS, DEFAULT_HOUR_OFFSETS))
+        hour_harmonics: int = int(cfg.get(CONF_HOUR_HARMONICS, DEFAULT_HOUR_HARMONICS))
+        reg_alpha: float = float(cfg.get(CONF_REG_ALPHA, DEFAULT_REG_ALPHA))
+        group_weights = {
+            "time": float(cfg.get(CONF_WEIGHT_TIME, DEFAULT_WEIGHT_TIME)),
+            "temperature": float(cfg.get(CONF_WEIGHT_TEMPERATURE, DEFAULT_WEIGHT_TEMPERATURE)),
+            "lags": float(cfg.get(CONF_WEIGHT_LAGS, DEFAULT_WEIGHT_LAGS)),
+        }
 
         min_power: float = float(cfg.get(CONF_MIN_POWER, DEFAULT_MIN_POWER))
         max_power: float = float(cfg.get(CONF_MAX_POWER, DEFAULT_MAX_POWER))
@@ -178,20 +197,33 @@ class PowerPredictorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         mean_temp_fallback = float(df["temperature"].mean())
 
-        # ── Step 4: Add lag features ─────────────────────────────────────────
+        # ── Step 4: Add lag + cyclical hour features ─────────────────────────
         df = await self.hass.async_add_executor_job(
             add_lagged_features, df, n_power_lags, n_temp_lags
         )
+        df = await self.hass.async_add_executor_job(
+            add_cyclical_features, df, hour_harmonics
+        )
 
-        features: list[str] = get_default_features()
+        features: list[str] = get_default_features(hour_harmonics)
         for i in range(1, n_power_lags + 1):
             features.append(f"power_lag_{i}")
         for i in range(1, n_temp_lags + 1):
             features.append(f"temp_lag_{i}")
 
+        # Per-feature influence weights (time / temperature / lags), expanded
+        # onto the exact feature column order. Applied as a per-feature ridge
+        # penalty on the standardized fit.
+        feature_weights = build_feature_weights(features, group_weights)
+
         # ── Step 5: Train on full dataset ────────────────────────────────────
         _LOGGER.debug("Training quantile regression model on %d samples", len(df))
-        model = QuantileRegressionModel(dynamic_config=dynamic_config)
+        model = QuantileRegressionModel(
+            dynamic_config=dynamic_config,
+            alpha=reg_alpha,
+            feature_weights=feature_weights,
+            standardize=True,
+        )
         await self.hass.async_add_executor_job(
             model.train,
             df[features].values,
@@ -235,6 +267,7 @@ class PowerPredictorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             features,
             n_power_lags,
             n_temp_lags,
+            hour_harmonics,
         )
 
         # ── Step 7: Generate predictions ─────────────────────────────────────
@@ -367,6 +400,7 @@ def _build_future_df(
     features: list[str],
     n_power_lags: int,
     n_temp_lags: int,
+    hour_harmonics: int = 0,
 ) -> pd.DataFrame:
     """
     Build a feature DataFrame covering the next n_hours starting at the next
@@ -489,5 +523,9 @@ def _build_future_df(
         for i in range(1, n_temp_lags + 1):
             lagged = combined_temp.shift(i)
             df_future[f"temp_lag_{i}"] = lagged.iloc[max_lag:].values
+
+    # Cyclical hour encoding — identical transform to the training frame, so the
+    # future feature columns line up with what the model was trained on.
+    df_future = add_cyclical_features(df_future, hour_harmonics)
 
     return df_future

@@ -83,8 +83,70 @@ def test_add_lagged_features_shifts_and_drops_leading_rows():
     assert out["temp_lag_1"].iloc[0] == 11.0
 
 
-def test_get_default_features_exact_order():
-    assert dp.get_default_features() == ["year", "month", "day_of_week", "hour", "temperature"]
+def test_get_default_features_linear_hour_when_no_harmonics():
+    assert dp.get_default_features(0) == ["year", "month", "day_of_week", "hour", "temperature"]
+
+
+def test_get_default_features_cyclical_default_two_harmonics():
+    assert dp.get_default_features() == [
+        "year", "month", "day_of_week",
+        "hour_sin_1", "hour_cos_1", "hour_sin_2", "hour_cos_2",
+        "temperature",
+    ]
+
+
+def test_get_default_features_one_harmonic():
+    assert dp.get_default_features(1) == [
+        "year", "month", "day_of_week", "hour_sin_1", "hour_cos_1", "temperature",
+    ]
+
+
+def test_add_cyclical_features_values_and_period():
+    df = pd.DataFrame({"hour": [0, 6, 12, 18]})
+    out = dp.add_cyclical_features(df, hour_harmonics=2)
+    assert {"hour_sin_1", "hour_cos_1", "hour_sin_2", "hour_cos_2"} <= set(out.columns)
+    # First harmonic: sin(2*pi*hour/24), cos(2*pi*hour/24)
+    assert out["hour_sin_1"].tolist() == pytest.approx([0.0, 1.0, 0.0, -1.0], abs=1e-9)
+    assert out["hour_cos_1"].tolist() == pytest.approx([1.0, 0.0, -1.0, 0.0], abs=1e-9)
+    # Raw hour column is preserved untouched (needed for peak/off-peak routing).
+    assert out["hour"].tolist() == [0, 6, 12, 18]
+
+
+def test_add_cyclical_features_hour_0_and_24_match():
+    # The encoding is periodic: hour 0 and a notional hour 24 map identically.
+    out = dp.add_cyclical_features(pd.DataFrame({"hour": [0, 24]}), hour_harmonics=2)
+    assert out["hour_sin_1"].iloc[0] == pytest.approx(out["hour_sin_1"].iloc[1], abs=1e-9)
+    assert out["hour_cos_2"].iloc[0] == pytest.approx(out["hour_cos_2"].iloc[1], abs=1e-9)
+
+
+def test_add_cyclical_features_zero_harmonics_noop():
+    df = pd.DataFrame({"hour": [1, 2, 3]})
+    assert dp.add_cyclical_features(df, hour_harmonics=0) is df
+
+
+def test_build_feature_weights_groups_and_order():
+    features = [
+        "year", "month", "day_of_week",
+        "hour_sin_1", "hour_cos_1",
+        "temperature",
+        "power_lag_1", "power_lag_2",
+        "temp_lag_1",
+    ]
+    w = dp.build_feature_weights(
+        features, {"time": 3.0, "temperature": 0.5, "lags": 2.0}
+    )
+    assert w.tolist() == [1.0, 1.0, 1.0, 3.0, 3.0, 0.5, 2.0, 2.0, 0.5]
+
+
+def test_build_feature_weights_linear_hour_in_time_group():
+    w = dp.build_feature_weights(["hour", "temperature"], {"time": 4.0})
+    assert w.tolist() == [4.0, 1.0]
+
+
+def test_build_feature_weights_missing_groups_default_neutral():
+    features = ["hour_sin_1", "temperature", "power_lag_1"]
+    w = dp.build_feature_weights(features, {})
+    assert w.tolist() == [1.0, 1.0, 1.0]
 
 
 def test_normalize_hour_offsets_list_of_rows():

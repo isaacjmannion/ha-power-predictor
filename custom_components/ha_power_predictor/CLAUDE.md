@@ -33,12 +33,25 @@ the leading `max(n_power_lags, n_temp_lags)` rows (which would hold NaN lags).
 
 ### Feature list (built in `coordinator.py`)
 
-`get_default_features()` returns the base
-`["year", "month", "day_of_week", "hour", "temperature"]`; the coordinator
-appends `power_lag_1..n_power_lags` then `temp_lag_1..n_temp_lags`. The model is
-trained and predicts on `df[features].values` in this exact column order, and
-`predict_iterative` finds the power-lag columns by substring (`"power_lag" in
-feat`) — so the names matter.
+`get_default_features(hour_harmonics)` returns the base calendar/temperature
+features with the **hour encoded cyclically**: with the default `hour_harmonics=2`
+it is `["year", "month", "day_of_week", "hour_sin_1", "hour_cos_1", "hour_sin_2",
+"hour_cos_2", "temperature"]` (with `hour_harmonics=0` it falls back to a single
+linear `"hour"`). The coordinator appends `power_lag_1..n_power_lags` then
+`temp_lag_1..n_temp_lags`. The cyclical columns are added by
+`add_cyclical_features` (a pure function of `hour`) on **both** the training df
+and the future df, so historical and future frames encode identically. The raw
+`hour` column is kept in the DataFrame regardless — it is passed separately to
+`train`/`predict`/`predict_iterative` for peak/off-peak routing.
+
+The model is trained and predicts on `df[features].values` in this exact column
+order, and `predict_iterative` finds the power-lag columns by substring
+(`"power_lag" in feat`) — so the names matter (the cyclical names deliberately
+avoid that substring).
+
+`build_feature_weights(features, {time, temperature, lags})` expands the three
+group influence weights onto a per-column vector aligned to `features` (calendar
+columns stay 1.0). It feeds the model's per-feature ridge penalty.
 
 ### Coordinator result dict (`_async_update_data` return → `coordinator.data`)
 
@@ -71,10 +84,22 @@ do **not** (see "Hour-of-day offsets" below).
 
 - **Algorithm:** quantile regression solved by **IRLS** (Iteratively Reweighted
   Least Squares) — asymmetric pinball-loss weights, solving
-  `(XᵀWX + αI)β = XᵀWy` each iteration, warm-started from OLS. Pure numpy on
+  `(XᵀWX + diag(reg))β = XᵀWy` each iteration, warm-started from OLS. Pure numpy on
   purpose (lighter/faster than sklearn's LP solver for this data size). The
   intercept is an augmented leading ones column and is **not** regularised
   (`reg_diag[0] = 0`).
+- **Standardization + per-feature weights:** the coordinator constructs the model
+  with `standardize=True`, a configurable `alpha`, and a `feature_weights` vector.
+  `train` fits **one global** z-score scaler on the full training matrix (shared by
+  both peak/off-peak sub-models so the future frame's scaling matches; constant
+  columns floor `sigma=1.0`), then fits on the standardized matrix.
+  `feature_weights` become a **per-feature ridge penalty** `reg_diag[j] = alpha /
+  w_j²` (larger weight → smaller penalty → more influence; equivalent to scaling a
+  standardized column by `w_j`). `predict` applies the **stored training** scaler
+  inside the call — crucially, on the *raw* matrix — so `predict_iterative` can
+  keep writing raw-kW predictions into the `power_lag_*` columns without a unit
+  mismatch. Defaults (`standardize=False`, `alpha=0.01`, `feature_weights=None`)
+  preserve the original behavior for the bare-solver unit tests.
 - **Dynamic peak/off-peak:** when `dynamic_config` is provided (it always is from
   the coordinator), `train` fits **two separate models** — one on hours where
   `peak_start <= hour <= peak_end`, one on the rest — and `predict` routes each
