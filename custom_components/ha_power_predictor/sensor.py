@@ -241,7 +241,9 @@ class FittedModelSensor(CoordinatorEntity[PowerPredictorCoordinator], SensorEnti
     training_samples     Number of hourly records used for training.
     """
 
-    _attr_device_class = SensorDeviceClass.POWER
+    # The state is a coverage percentage, not power — no power device class.
+    # HA has no generic "percentage" device class, so leave device_class unset;
+    # "%" + MEASUREMENT is a valid combination on its own.
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = "%"
     _attr_icon = "mdi:chart-bell-curve-cumulative"
