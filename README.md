@@ -71,16 +71,16 @@ Tune the model behaviour via **Settings → Devices & Services → HA Power Pred
 | `Min Predicted Power (kW)` | Clamp predictions to at least this value | 0.5 |
 | `Max Predicted Power (kW)` | Clamp predictions to at most this value | 15.0 |
 | `Power Lag Features` | Previous hourly power readings used as model features | 5 |
-| `Temperature Lag Features` | Previous hourly temperature readings used as model features | 5 |
+| `Temperature Lag Features` | Previous hourly temperature readings used as model features (only used when temperature weight > 0; 1–2 is plenty) | 0 |
 | `Peak Start Hour` | Hour the peak period begins (0–23, inclusive) | 9 |
 | `Peak End Hour` | Hour the peak period ends (0–23, inclusive) | 22 |
 | `Peak Quantile` | Quantile applied during peak hours | 0.75 |
 | `Off-Peak Quantile` | Quantile applied during off-peak hours | 0.50 |
-| `Time-of-day Detail (hour harmonics)` | sin/cos harmonics shaping the daily curve: `0` = straight ramp (old behaviour), `2` = morning + evening peaks, `3` = finer (see [Forecast Sharpness & Feature Weights](#forecast-sharpness--feature-weights)) | 2 |
-| `Regularisation Strength (alpha)` | L2 strength on the standardised features; higher smooths the fit and makes the influence weights below bite harder | 1.0 |
-| `Time-of-day Influence Weight` | Relative influence of the time-of-day features (`0` disables, `>1` amplifies) | 1.0 |
-| `Temperature Influence Weight` | Relative influence of temperature and its lag features | 1.0 |
-| `Recent-usage (Lag) Influence Weight` | Relative influence of the power-lag features | 1.0 |
+| `Time-of-day Detail (hour harmonics)` | sin/cos harmonics shaping the daily curve: `0` = straight ramp (old behaviour), `2` = morning + evening peaks, `3` = finer (see [Forecast Sharpness & Feature Weights](#forecast-sharpness--feature-weights)) | 3 |
+| `Regularisation Strength (alpha)` | L2 strength on the standardised features; higher smooths the fit and makes the influence weights below bite harder | 0.1 |
+| `Time-of-day Influence Weight` | Relative influence of the time-of-day features (`0` disables, `>1` amplifies) | 2.0 |
+| `Temperature Influence Weight` | Relative influence of temperature and its lag features (`0` = off; raise if temperature drives your load, e.g. HVAC) | 0.0 |
+| `Recent-usage (Lag) Influence Weight` | Relative influence of the power-lag features | 0.5 |
 | `Max Forecast Hours` | Maximum hours to forecast (48–168 hours / 2-7 days) | 48 |
 | `Hour-of-day Offsets` | Fixed kW added at chosen hours of the day, local time (see [Hour-of-day Offsets](#hour-of-day-offsets)) | _(none)_ |
 
@@ -91,6 +91,8 @@ Tune the model behaviour via **Settings → Devices & Services → HA Power Pred
 If your forecast looks too flat or smooth compared to your real daily load, the most effective lever is **Time-of-day Detail**. The model is linear, so the hour-of-day is encoded as cyclical (sin/cos) features — a single straight ramp can't represent a curve with both a morning and an evening peak, but `2` harmonics can. Set it to `0` to fall back to the old single-ramp behaviour.
 
 The three **influence weights** let you dial how much each group of features drives the prediction — for example, raise `Time-of-day Influence Weight` and lower `Temperature Influence Weight` if the weather signal is washing out your daily pattern. Weights are a *relative-influence* control, not a sharpness lever on their own, and they only take effect when `Regularisation Strength (alpha)` is non-zero (features are standardised first so the weights are comparable across groups). A weight of `1.0` is neutral; `0` disables that group entirely.
+
+The defaults were retuned from walk-forward backtesting (see [`tools/cv_sweep.py`](tools/cv_sweep.py)): more time-of-day detail (`3` harmonics), recent-usage lags doing the heavy lifting, and **temperature off by default** (`Temperature Influence Weight = 0`). Temperature was not a useful predictor on the data this was tuned against, but it may well be for your home — if your load is HVAC-driven, raise `Temperature Influence Weight` (and set `Temperature Lag Features` to 1–2) and re-run the backtest to check. These defaults are a starting point, not a universal optimum; the export + backtest workflow exists so you can tune for your own home.
 
 ### Hour-of-day Offsets
 
@@ -277,11 +279,12 @@ series:
 ## Changelog
 
 ### 0.3.0 — Sharper forecasts: cyclical hour features + feature weights
-- **New — cyclical hour-of-day features:** the hour is now encoded as sin/cos harmonics instead of a single linear term, so the model can represent a bimodal daily load curve (a morning *and* an evening peak) rather than a single straight ramp. Configurable via **Time-of-day Detail (hour harmonics)** (`0` = old linear behaviour, default `2`). This is the main lever for forecast sharpness.
+- **New — cyclical hour-of-day features:** the hour is now encoded as sin/cos harmonics instead of a single linear term, so the model can represent a bimodal daily load curve (a morning *and* an evening peak) rather than a single straight ramp. Configurable via **Time-of-day Detail (hour harmonics)** (`0` = old linear behaviour, default `3`). This is the main lever for forecast sharpness.
 - **New — feature influence weights:** three sliders — **Time-of-day**, **Temperature**, and **Recent-usage (Lag)** influence weights — let you dial how strongly each group of features drives the prediction (e.g. favour time-of-day over temperature). `1.0` is neutral, `0` disables a group.
 - **New — Regularisation Strength (alpha):** exposes the L2 strength, which now applies to **standardised** features (the model z-scores its inputs before fitting). Standardisation makes the penalty act evenly across features and is what makes the influence weights comparable and effective.
-- **New — data export + offline backtesting:** *Export Training Data* / *Export All History* buttons write raw stats + config to a JSON file in the config dir, and a bundled `tools/backtest.py` replays the exact pipeline offline to backtest and sweep settings (see [Exporting Data for Offline Analysis](#exporting-data-for-offline-analysis)).
-- **Behaviour change:** because of standardisation and the new default `alpha` (1.0, was an internal 0.01), forecasts will differ from 0.2.x even with the new weights left at their neutral defaults. Set `hour harmonics` to `0` and the weights to `1.0` for the closest match to the old shape.
+- **New — data export + offline backtesting:** *Export Training Data* / *Export All History* buttons write raw stats + config to a JSON file in the config dir, and bundled tools (`tools/backtest.py` single-fold, `tools/cv_sweep.py` walk-forward cross-validation) replay the exact pipeline offline to backtest and sweep settings (see [Exporting Data for Offline Analysis](#exporting-data-for-offline-analysis)).
+- **Retuned defaults:** the default model parameters were chosen from walk-forward backtesting — `hour harmonics 3`, `alpha 0.1`, time weight `2.0`, lag weight `0.5`, and **temperature off** (`Temperature Influence Weight 0`, `Temperature Lag Features 0`). Temperature didn't improve accuracy on the load these were tuned against; raise it if your load is weather-driven. Defaults are a sensible starting point, not a universal optimum — tune for your home with the export + backtest workflow.
+- **Behaviour change:** standardisation + these retuned defaults mean forecasts differ from 0.2.x. For the closest match to the old shape, set `hour harmonics` to `0` and all influence weights to `1.0`.
 - Corrected stale entries in the Model Parameters table (update interval, min/max power defaults) and removed the obsolete `Use Dynamic Quantile` / `Quantile` rows (peak/off-peak quantiles are always active).
 
 ### 0.2.2 — Hour-of-day offsets, faster updates, DST fix

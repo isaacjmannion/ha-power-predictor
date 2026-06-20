@@ -30,7 +30,7 @@ CONF_WEIGHT_LAGS = "weight_lags"
 # Defaults
 DEFAULT_INTEGRATION_NAME = "Power Predictor"
 DEFAULT_N_POWER_LAGS = 5
-DEFAULT_N_TEMP_LAGS = 5
+DEFAULT_N_TEMP_LAGS = 0  # 0 by default (temperature is off by default; see weights below)
 DEFAULT_PEAK_START = 9
 DEFAULT_PEAK_END = 22
 DEFAULT_PEAK_QUANTILE = 0.75
@@ -41,11 +41,12 @@ DEFAULT_MIN_POWER = 0.5
 DEFAULT_MAX_POWER = 15.0
 DEFAULT_MAX_FORECAST_HOURS = 48  # 2 days
 DEFAULT_HOUR_OFFSETS: list = []  # rows of {"hour": int, "offset": float kW}
-DEFAULT_HOUR_HARMONICS = 2  # sin/cos harmonics for hour-of-day (0 = linear hour)
-DEFAULT_REG_ALPHA = 1.0  # L2 strength on standardized features (was a hardcoded 0.01)
-DEFAULT_WEIGHT_TIME = 1.0  # influence of time-of-day features (1.0 = neutral)
-DEFAULT_WEIGHT_TEMPERATURE = 1.0  # influence of temperature + temp-lag features
-DEFAULT_WEIGHT_LAGS = 1.0  # influence of power-lag features
+# Defaults below were retuned from walk-forward backtesting (see tools/cv_sweep.py).
+DEFAULT_HOUR_HARMONICS = 3  # sin/cos harmonics for hour-of-day (0 = linear hour)
+DEFAULT_REG_ALPHA = 0.1  # L2 strength on standardized features (higher over-smooths)
+DEFAULT_WEIGHT_TIME = 2.0  # influence of time-of-day features (1.0 = neutral)
+DEFAULT_WEIGHT_TEMPERATURE = 0.0  # temperature off by default; raise if it helps your load
+DEFAULT_WEIGHT_LAGS = 0.5  # influence of power-lag features
 
 # Pipeline constants
 MIN_TRAINING_SAMPLES = 24  # 1 day of hourly statistics
