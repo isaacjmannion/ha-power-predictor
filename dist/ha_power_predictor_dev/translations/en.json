@@ -1,0 +1,98 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Entity Configuration",
+        "description": "Select the Home Assistant entities to use for power prediction. All three entities must have sufficent statistics available in the recorder.",
+        "data": {
+          "integration_name": "Integration Name",
+          "power_entity": "Power Consumption Entity",
+          "temperature_entity": "Temperature Entity",
+          "weather_forecast_entity": "Weather Forecast Entity"
+        },
+        "data_description": {
+          "integration_name": "Custom name for this predictor instance (e.g. 'House', 'Pool', 'EV Charger'). Used to distinguish multiple predictors in the UI. Defaults to 'Power Predictor' if left empty.",
+          "power_entity": "The sensor tracking your total power consumption (e.g. sensor.power_consumption). Must have long-term statistics.",
+          "temperature_entity": "An outdoor temperature sensor (e.g. sensor.outdoor_temperature). Must have long-term statistics.",
+          "weather_forecast_entity": "A weather entity that provides an hourly forecast (e.g. weather.home)."
+        }
+      },
+      "model": {
+        "title": "Model Parameters",
+        "description": "Configure the prediction model. The defaults work well for most setups.",
+        "data": {
+          "min_power": "Minimum Predicted Power (kW)",
+          "max_power": "Maximum Predicted Power (kW)",
+          "history_days": "History Days",
+          "update_interval_minutes": "Update Interval (minutes)",
+          "n_power_lags": "Power Lag Features",
+          "n_temp_lags": "Temperature Lag Features",
+          "peak_start": "Peak Period Start Hour (0–23)",
+          "peak_end": "Peak Period End Hour (0–23)",
+          "peak_quantile": "Peak Period Quantile",
+          "offpeak_quantile": "Off-Peak Quantile",
+          "hour_harmonics": "Time-of-day detail (hour harmonics)",
+          "reg_alpha": "Regularisation strength (alpha)",
+          "weight_time": "Time-of-day influence weight",
+          "weight_temperature": "Temperature influence weight",
+          "weight_lags": "Recent-usage (lag) influence weight",
+          "max_forecast_hours": "Max Forecast Hours",
+          "hour_offsets": "Hour-of-day offsets"
+        },
+        "data_description": {
+          "min_power": "Clamp predicted values to at least this value in kW (0 = no minimum beyond zero) Set around you min overnight usage.",
+          "max_power": "Clamp predicted values to at most this value in kW. Set just above your typical peak usage.",
+          "history_days": "How many days of historical data to train on (1–365).",
+          "update_interval_minutes": "How often to retrain and refresh predictions. Minimum 5 minutes.",
+          "n_power_lags": "Number of previous hourly power readings to include as features (0 = none = past has no influence on future).",
+          "n_temp_lags": "Number of previous hourly temperature readings to include as features (0 = none = past has no influence on future).",
+          "peak_start": "Hour of day when the peak period begins (inclusive).",
+          "peak_end": "Hour of day when the peak period ends (inclusive).",
+          "peak_quantile": "Quantile applied during peak hours.",
+          "offpeak_quantile": "Quantile applied during off-peak hours.",
+          "hour_harmonics": "How finely the model can shape the daily curve. 0 = a single straight ramp (old behaviour); 2 forms separate morning and evening peaks; 3 (default) adds finer detail.",
+          "reg_alpha": "Overall regularisation strength applied to the standardised features. Higher values smooth the model and make the influence weights below bite harder. 0.1 is a sensible default; higher over-smooths.",
+          "weight_time": "Relative influence of time-of-day features. Above 1.0 the daily pattern matters more, below 1.0 less, 0 disables it. Only has an effect when the regularisation strength is non-zero.",
+          "weight_temperature": "Relative influence of temperature and its lag features. Lower this if the weather signal is washing out the daily pattern.",
+          "weight_lags": "Relative influence of recent power readings (the lag features).",
+          "max_forecast_hours": "Maximum hours to forecast into the future (48–168 hours / 2-7 days). Note: Forecasts beyond weather data availability will use historical average temperature.",
+          "hour_offsets": "Add a fixed kW offset at a chosen hour of the day, in local time: set the hour (0-23) and the kW to add — e.g. hour 13 adds the offset at 1 pm every day (good for EV charging or a pool pump). Hours not listed are unchanged; offsets may be negative and are still bounded by Min/Max Predicted Power."
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to Home Assistant recorder.",
+      "invalid_hour_offsets": "Each offset row needs an hour between 0 and 23 and a numeric kW value."
+    }
+  },
+  "options": {
+    "error": {
+      "invalid_hour_offsets": "Each offset row needs an hour between 0 and 23 and a numeric kW value."
+    },
+    "step": {
+      "init": {
+        "title": "Model Parameters",
+        "description": "Adjust model parameters. Changes take effect immediately after saving.",
+        "data": {
+          "min_power": "Minimum Predicted Power (kW)",
+          "max_power": "Maximum Predicted Power (kW)",
+          "history_days": "History Days",
+          "update_interval_minutes": "Update Interval (minutes)",
+          "n_power_lags": "Power Lag Features",
+          "n_temp_lags": "Temperature Lag Features",
+          "peak_start": "Peak Period Start Hour",
+          "peak_end": "Peak Period End Hour",
+          "peak_quantile": "Peak Period Quantile",
+          "offpeak_quantile": "Off-Peak Quantile",
+          "hour_harmonics": "Time-of-day detail (hour harmonics)",
+          "reg_alpha": "Regularisation strength (alpha)",
+          "weight_time": "Time-of-day influence weight",
+          "weight_temperature": "Temperature influence weight",
+          "weight_lags": "Recent-usage (lag) influence weight",
+          "max_forecast_hours": "Max Forecast Hours",
+          "hour_offsets": "Hour-of-day offsets"
+        }
+      }
+    }
+  }
+}

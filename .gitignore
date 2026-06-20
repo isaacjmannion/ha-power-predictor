@@ -3,4 +3,8 @@
 __pycache__/
 *.pyc
 48hr.txt
-/dist/
+# Build artifacts, except the committed dev A/B distribution (dist/ha_power_predictor_dev)
+/dist/*
+!/dist/ha_power_predictor_dev/
+# Exported recorder data — contains the user's home consumption history, never commit
+*_export_*.json
