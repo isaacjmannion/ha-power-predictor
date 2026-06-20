@@ -109,6 +109,32 @@ Example — add 7 kW while an EV charges from 1 am to 4 am:
 
 ---
 
+## Exporting Data for Offline Analysis
+
+To tune settings or test changes without touching your live instance, the
+predictor exposes two buttons:
+
+- **Export Training Data** — exports the configured *History Days* window.
+- **Export All History** — exports up to a year of available recorder data.
+
+Pressing either writes a self-describing JSON file (raw hourly power +
+temperature statistics, plus the full resolved configuration) to your Home
+Assistant **config directory**; a notification shows the exact path. Because the
+raw statistics are exported, an offline script can replay the integration's
+exact pipeline.
+
+The repo ships such a script, [`tools/backtest.py`](tools/backtest.py), which
+backtests the forecast and sweeps settings to find the best combination:
+
+```bash
+python tools/backtest.py your_export.json            # backtest the exported config
+python tools/backtest.py your_export.json --sweep    # grid-search better settings
+```
+
+See [`tools/README.md`](tools/README.md) for details and the metrics it reports.
+
+---
+
 ## Published Sensors
 
 After the first successful prediction run, four sensors are created:
@@ -254,6 +280,7 @@ series:
 - **New — cyclical hour-of-day features:** the hour is now encoded as sin/cos harmonics instead of a single linear term, so the model can represent a bimodal daily load curve (a morning *and* an evening peak) rather than a single straight ramp. Configurable via **Time-of-day Detail (hour harmonics)** (`0` = old linear behaviour, default `2`). This is the main lever for forecast sharpness.
 - **New — feature influence weights:** three sliders — **Time-of-day**, **Temperature**, and **Recent-usage (Lag)** influence weights — let you dial how strongly each group of features drives the prediction (e.g. favour time-of-day over temperature). `1.0` is neutral, `0` disables a group.
 - **New — Regularisation Strength (alpha):** exposes the L2 strength, which now applies to **standardised** features (the model z-scores its inputs before fitting). Standardisation makes the penalty act evenly across features and is what makes the influence weights comparable and effective.
+- **New — data export + offline backtesting:** *Export Training Data* / *Export All History* buttons write raw stats + config to a JSON file in the config dir, and a bundled `tools/backtest.py` replays the exact pipeline offline to backtest and sweep settings (see [Exporting Data for Offline Analysis](#exporting-data-for-offline-analysis)).
 - **Behaviour change:** because of standardisation and the new default `alpha` (1.0, was an internal 0.01), forecasts will differ from 0.2.x even with the new weights left at their neutral defaults. Set `hour harmonics` to `0` and the weights to `1.0` for the closest match to the old shape.
 - Corrected stale entries in the Model Parameters table (update interval, min/max power defaults) and removed the obsolete `Use Dynamic Quantile` / `Quantile` rows (peak/off-peak quantiles are always active).
 

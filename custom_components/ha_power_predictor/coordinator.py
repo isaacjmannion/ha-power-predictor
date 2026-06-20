@@ -16,24 +16,29 @@ Runs the complete pipeline on a configurable schedule and on manual
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime, timedelta
 from typing import Any
 
 import numpy as np
 import pandas as pd
+from homeassistant.components import persistent_notification
 from homeassistant.components.recorder import get_instance
 from homeassistant.components.recorder.statistics import statistics_during_period
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.loader import async_get_integration
 from homeassistant.util import dt as dt_util
+from homeassistant.util import slugify
 
 from .const import (
     CONF_HISTORY_DAYS,
     CONF_HOUR_HARMONICS,
     CONF_HOUR_OFFSETS,
+    CONF_INTEGRATION_NAME,
     CONF_MAX_FORECAST_HOURS,
     CONF_MAX_POWER,
     CONF_MIN_POWER,
@@ -54,6 +59,7 @@ from .const import (
     DEFAULT_HISTORY_DAYS,
     DEFAULT_HOUR_HARMONICS,
     DEFAULT_HOUR_OFFSETS,
+    DEFAULT_INTEGRATION_NAME,
     DEFAULT_MAX_FORECAST_HOURS,
     DEFAULT_MAX_POWER,
     DEFAULT_MIN_POWER,
@@ -69,11 +75,13 @@ from .const import (
     DEFAULT_WEIGHT_TEMPERATURE,
     DEFAULT_WEIGHT_TIME,
     DOMAIN,
+    EXPORT_SCHEMA_VERSION,
     MIN_TRAINING_SAMPLES,
 )
 from .data_processing import (
     add_cyclical_features,
     add_lagged_features,
+    build_export_payload,
     build_feature_weights,
     get_default_features,
     normalize_hour_offsets,
@@ -386,6 +394,98 @@ class PowerPredictorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 err,
             )
         return []
+
+    def _entity_friendly_name(self, entity_id: str | None) -> str | None:
+        """Return an entity's friendly (display) name, or None if unavailable."""
+        if not entity_id:
+            return None
+        state = self.hass.states.get(entity_id)
+        return state.name if state is not None else None
+
+    async def async_export_data(self, days: int, label: str) -> str:
+        """
+        Export raw recorder statistics + the resolved config to a JSON file in
+        the HA config directory, for offline analysis / backtesting.
+
+        The raw stats are exported (not a processed frame) so an offline script
+        can replay the exact pure pipeline (process → lag → cyclical → model).
+
+        Args:
+            days:  How many days back to fetch (e.g. history_days, or a larger
+                   "all available" window).
+            label: Short tag for the filename ("training" / "full").
+
+        Returns:
+            The absolute path of the written JSON file.
+        """
+        cfg = {**self.entry.data, **self.entry.options}
+        power_entity: str = cfg[CONF_POWER_ENTITY]
+        temp_entity: str = cfg[CONF_TEMPERATURE_ENTITY]
+        weather_entity: str | None = cfg.get(CONF_WEATHER_FORECAST_ENTITY)
+        integration_name: str = cfg.get(CONF_INTEGRATION_NAME, DEFAULT_INTEGRATION_NAME)
+
+        now_utc = dt_util.utcnow()
+        start_utc = now_utc - timedelta(days=days)
+
+        power_stats, temp_stats = await get_instance(self.hass).async_add_executor_job(
+            self._fetch_statistics, power_entity, temp_entity, start_utc, now_utc
+        )
+
+        try:
+            integration = await async_get_integration(self.hass, DOMAIN)
+            version = str(integration.version)
+        except Exception:  # version is best-effort metadata only
+            version = "unknown"
+
+        meta = {
+            "schema_version": EXPORT_SCHEMA_VERSION,
+            "exported_at": dt_util.now().isoformat(),
+            "integration": DOMAIN,
+            "integration_name": integration_name,
+            "version": version,
+            "power_entity": power_entity,
+            "power_entity_name": self._entity_friendly_name(power_entity),
+            "temperature_entity": temp_entity,
+            "temperature_entity_name": self._entity_friendly_name(temp_entity),
+            "weather_entity": weather_entity,
+            "weather_entity_name": self._entity_friendly_name(weather_entity),
+            "requested_days": days,
+            "scope": label,
+            "timezone": str(dt_util.get_default_time_zone()),
+        }
+        payload = build_export_payload(power_stats, temp_stats, cfg, meta)
+
+        timestamp = dt_util.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{slugify(integration_name)}_export_{label}_{timestamp}.json"
+        path = self.hass.config.path(filename)
+
+        await self.hass.async_add_executor_job(_write_json_file, path, payload)
+
+        _LOGGER.info(
+            "Exported %d power + %d temperature rows (%s, %d days) to %s",
+            payload["meta"]["n_power_rows"],
+            payload["meta"]["n_temperature_rows"],
+            label,
+            days,
+            path,
+        )
+        persistent_notification.async_create(
+            self.hass,
+            (
+                f"Exported **{payload['meta']['n_power_rows']}** power and "
+                f"**{payload['meta']['n_temperature_rows']}** temperature rows "
+                f"({days} days) to:\n\n`{path}`"
+            ),
+            title=f"{integration_name}: data export complete",
+            notification_id=f"{self.entry.entry_id}_export_{label}",
+        )
+        return path
+
+
+def _write_json_file(path: str, payload: dict) -> None:
+    """Write the export payload as pretty JSON (runs in the executor)."""
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(payload, fh, indent=2)
 
 
 # ---------------------------------------------------------------------------

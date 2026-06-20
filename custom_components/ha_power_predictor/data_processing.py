@@ -304,6 +304,71 @@ def build_feature_weights(
     return np.asarray(weights, dtype=float)
 
 
+def _export_stat_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """
+    Normalize recorder statistics rows for JSON export.
+
+    Keeps only ``start`` and ``mean`` (all ``process_ha_statistics`` needs) and
+    coerces ``start`` to a float Unix epoch (seconds) so it is JSON-serializable
+    and round-trips through ``_parse_start``. Datetime/Timestamp starts (older
+    HA) are converted via ``.timestamp()``; numeric starts pass through. ``mean``
+    is kept verbatim, including ``None`` (the local pipeline drops None means just
+    like production), preserving raw fidelity.
+    """
+    out: list[dict[str, Any]] = []
+    for rec in rows:
+        start = rec.get("start")
+        if isinstance(start, (int, float)):
+            start = float(start)
+        elif hasattr(start, "timestamp"):
+            start = float(start.timestamp())
+        out.append({"start": start, "mean": rec.get("mean")})
+    return out
+
+
+def build_export_payload(
+    power_stats: list[dict[str, Any]],
+    temp_stats: list[dict[str, Any]],
+    config: dict[str, Any],
+    meta: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """
+    Assemble the self-describing data-export payload.
+
+    Pure (no Home Assistant): the coordinator fetches the recorder rows and
+    resolves the config, then calls this to build the JSON-serializable dict.
+    The raw ``power_stats`` / ``temperature_stats`` are exported (not a processed
+    frame) so an offline script can feed them straight into
+    ``process_ha_statistics`` → ``add_lagged_features`` → ``add_cyclical_features``
+    → the model, reproducing the live pipeline exactly.
+
+    Args:
+        power_stats: Recorder statistics rows for the power entity.
+        temp_stats:  Recorder statistics rows for the temperature entity.
+        config:      Resolved integration settings (entry.data + entry.options).
+        meta:        Extra metadata to merge in (export time, version, entities…).
+                     ``n_power_rows`` / ``n_temperature_rows`` are filled in here.
+
+    Returns:
+        ``{"meta": {...}, "config": {...}, "power_stats": [...],
+           "temperature_stats": [...]}`` — all JSON-serializable.
+    """
+    power_rows = _export_stat_rows(power_stats)
+    temp_rows = _export_stat_rows(temp_stats)
+
+    full_meta: dict[str, Any] = dict(meta or {})
+    full_meta.setdefault("schema_version", 1)
+    full_meta["n_power_rows"] = len(power_rows)
+    full_meta["n_temperature_rows"] = len(temp_rows)
+
+    return {
+        "meta": full_meta,
+        "config": dict(config),
+        "power_stats": power_rows,
+        "temperature_stats": temp_rows,
+    }
+
+
 def normalize_hour_offsets(raw: Any) -> dict[int, float]:
     """
     Normalize the configured hourly offsets into a {hour: offset} mapping.

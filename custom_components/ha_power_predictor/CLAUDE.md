@@ -8,12 +8,12 @@ validation steps, and release process, see the repo-root `CLAUDE.md`.
 | File | Responsibility |
 |------|----------------|
 | `__init__.py` | `async_setup_entry` / `async_unload_entry`. Creates the coordinator, runs the first refresh (`async_config_entry_first_refresh`, which raises `ConfigEntryNotReady` to make HA retry), forwards the `sensor` + `button` platforms, and registers an options-update listener that **reloads the entry** so option changes take effect immediately. |
-| `coordinator.py` | `PowerPredictorCoordinator` (subclass of `DataUpdateCoordinator`). Owns `_async_update_data` — the full fetch→train→predict pipeline, including applying the per-hour offsets — plus the module-level function `_build_future_df`. |
+| `coordinator.py` | `PowerPredictorCoordinator` (subclass of `DataUpdateCoordinator`). Owns `_async_update_data` — the full fetch→train→predict pipeline, including applying the per-hour offsets — plus `async_export_data` (data export) and the module-level functions `_build_future_df` / `_write_json_file`. |
 | `models.py` | The ML core. `QuantileRegressionModel` + the standalone `predict_iterative`. Pure numpy — no sklearn/scipy. |
-| `data_processing.py` | Pure helpers (numpy/pandas only): `process_ha_statistics`, `add_lagged_features`, `get_default_features`, `normalize_hour_offsets`, `_parse_start`. Recorder rows → training DataFrame, plus offset-row normalization. |
+| `data_processing.py` | Pure helpers (numpy/pandas only): `process_ha_statistics`, `add_lagged_features`, `add_cyclical_features`, `get_default_features`, `build_feature_weights`, `normalize_hour_offsets`, `build_export_payload`, `_parse_start`. Recorder rows → training DataFrame, feature engineering, offset/export payload building. |
 | `config_flow.py` | `PowerPredictorConfigFlow` (2 steps) + `PowerPredictorOptionsFlow`. `_model_schema` builder + `_coerce_numbers` + `_hour_offsets_error` (validates offset rows). |
 | `sensor.py` | Four entities: two `PowerPredictionSensor` (24h, 48h), one `ExtendedForecastSensor`, one `FittedModelSensor`. |
-| `button.py` | `TrainNowButton` → calls `coordinator.async_request_refresh()`. |
+| `button.py` | `TrainNowButton` → `coordinator.async_request_refresh()`; two `ExportDataButton`s (scope `training` / `full`) → `coordinator.async_export_data(days, scope)`. |
 | `const.py` | `DOMAIN`, `CONF_*` keys, `DEFAULT_*` values, and pipeline limits (`MIN_TRAINING_SAMPLES = 24`, `MAX_FORECAST_HOURS_LIMIT = 168`). |
 
 ## Data contracts
@@ -180,3 +180,25 @@ Users can add a fixed kW offset at specific hours of the day (config key
   issue #97474). `_hour_offsets_error` rejects rows with an out-of-range hour or
   non-numeric offset; the value is a list, so it is **not** in `_coerce_numbers`'
   integer set.
+
+## Data export (offline analysis / backtesting)
+
+Two per-instance buttons (`button.py`, `ExportDataButton` scope `training` /
+`full`) call `coordinator.async_export_data(days, label)`, which fetches recorder
+stats over `days` (history_days for `training`, `DEFAULT_EXPORT_FULL_DAYS=365`
+for `full`), builds the payload via the pure `build_export_payload`, and writes
+`<slug>_export_<label>_<ts>.json` to the **config dir** (`hass.config.path`,
+written in the executor via `_write_json_file`), then raises a persistent
+notification with the path.
+
+- **Raw stats, not a frame:** the payload carries the raw `power_stats` /
+  `temperature_stats` rows (`{start, mean}`, `start` normalized to epoch float by
+  `_export_stat_rows`) plus the resolved `config` and `meta` (the latter carries the
+  source entity ids **and** their friendly names, via `_entity_friendly_name`). This lets
+  `tools/backtest.py` feed them straight back through `process_ha_statistics` →
+  `add_lagged_features` → `add_cyclical_features` → the model — an exact replay
+  of the live pipeline. Keep `build_export_payload` pure (unit-tested in
+  `tests/pure/test_data_processing.py`).
+- **`tools/backtest.py`** (dev-only, not shipped) replays that pipeline offline:
+  walk-forward holdout forecast vs actuals, reporting MAE/RMSE/coverage/sharpness,
+  with a `--sweep` grid search over settings.

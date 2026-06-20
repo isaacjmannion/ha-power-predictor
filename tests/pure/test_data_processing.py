@@ -178,3 +178,40 @@ def test_normalize_hour_offsets_empty_and_none():
     assert dp.normalize_hour_offsets([]) == {}
     assert dp.normalize_hour_offsets(None) == {}
     assert dp.normalize_hour_offsets({}) == {}
+
+
+def test_build_export_payload_counts_config_and_meta():
+    power = [{"start": 1700000000.0, "mean": 1.5}, {"start": 1700003600.0, "mean": 2.0}]
+    temp = [{"start": 1700000000.0, "mean": 20.0}]
+    cfg = {"power_entity": "sensor.p", "hour_harmonics": 2}
+    payload = dp.build_export_payload(power, temp, cfg, meta={"version": "0.3.0"})
+    assert payload["meta"]["n_power_rows"] == 2
+    assert payload["meta"]["n_temperature_rows"] == 1
+    assert payload["meta"]["version"] == "0.3.0"
+    assert payload["meta"]["schema_version"] == 1
+    assert payload["config"] == cfg
+    assert payload["power_stats"][0] == {"start": 1700000000.0, "mean": 1.5}
+
+
+def test_build_export_payload_normalizes_datetime_start_to_epoch():
+    aware = datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc)
+    payload = dp.build_export_payload([{"start": aware, "mean": 1.0}], [], {})
+    start = payload["power_stats"][0]["start"]
+    assert isinstance(start, float)
+    assert start == aware.timestamp()
+
+
+def test_build_export_payload_preserves_none_means():
+    payload = dp.build_export_payload([{"start": 1700000000.0, "mean": None}], [], {})
+    assert payload["power_stats"][0]["mean"] is None
+
+
+def test_export_rows_round_trip_through_process():
+    base = 1_700_000_000
+    power = [{"start": base + 3600 * i, "mean": 1.0 + i} for i in range(3)]
+    temp = [{"start": base + 3600 * i, "mean": 20.0 + i} for i in range(3)]
+    payload = dp.build_export_payload(power, temp, {})
+    df = dp.process_ha_statistics(payload["power_stats"], payload["temperature_stats"])
+    assert len(df) == 3
+    assert df["consumption"].tolist() == [1.0, 2.0, 3.0]
+    assert df["temperature"].tolist() == [20.0, 21.0, 22.0]

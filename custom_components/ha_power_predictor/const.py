@@ -50,3 +50,7 @@ DEFAULT_WEIGHT_LAGS = 1.0  # influence of power-lag features
 # Pipeline constants
 MIN_TRAINING_SAMPLES = 24  # 1 day of hourly statistics
 MAX_FORECAST_HOURS_LIMIT = 168  # 7 days maximum
+
+# Data export (for offline analysis / backtesting)
+EXPORT_SCHEMA_VERSION = 1
+DEFAULT_EXPORT_FULL_DAYS = 365  # "all available" export window (recorder cap)
