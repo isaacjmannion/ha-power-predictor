@@ -49,3 +49,30 @@ weather forecast (this isolates model quality from forecast quality). Metrics:
 - Use **Export All History** if you want to sweep `--history-days`, since you
   can only backtest windows shorter than what you exported.
 - Requires `numpy` and `pandas` only; no Home Assistant install needed.
+
+## cv_sweep.py — walk-forward cross-validated sweep (more robust)
+
+`backtest.py` uses a single holdout, which on a short export can be misleading (a
+config can look great on one 48 h window and diverge on the next). `cv_sweep.py`
+is the robust version: it spreads several holdout windows across the whole export
+(the **same** windows for every config, so they're comparable), trains each on
+the `history_days` window preceding its holdout, and aggregates across folds.
+
+```bash
+python tools/cv_sweep.py power_predictor_export_full_*.json
+python tools/cv_sweep.py EXPORT.json --horizon 24 --folds 10
+python tools/cv_sweep.py EXPORT.json --json cv_results.json   # also dump full results
+```
+
+It ranks configs by **mean** RMSE but also reports `max_rmse` (worst fold) and
+`n_diverged` (folds where the forecast swing exceeds 2× reality), so unstable
+settings are flagged rather than hidden by an average — only `n_diverged = 0`
+configs are trustworthy. The default model defaults were chosen with this tool.
+
+Caveats: a config needing N days of history can't be evaluated in the first N
+days of the export, so very long `history_days` is validated on a later (and
+possibly seasonally narrower) slice. The perfect-weather assumption (actual
+holdout temps) flatters configs that lean on temperature — under real forecast
+error, temperature-light settings hold up better than the backtest suggests.
+Edit `SWEEP_GRID` and the fixed `WEIGHT_TIME` / `ALPHA` / `N_TEMP_LAGS` at the
+top of the script to explore other levers.
