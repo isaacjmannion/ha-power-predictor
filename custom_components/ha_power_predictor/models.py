@@ -416,30 +416,55 @@ def predict_iterative(
     features: list,
     n_power_lags: int,
     hours_test: Optional[np.ndarray] = None,
+    state_model: Optional[QuantileRegressionModel] = None,
 ) -> Dict[str, Any]:
     """
-    Perform iterative (auto-regressive) prediction, feeding each predicted
-    value back as the lag feature for subsequent steps.
+    Perform iterative (auto-regressive) prediction, feeding a predicted value
+    back as the lag feature for subsequent steps.
 
     Simulates real-time forecasting where future actual power values are
     unknown. Falls back to a single vectorised call when no power lag
     features are present.
 
+    State vs reported value (``state_model``)
+    -----------------------------------------
+    The value written back into the ``power_lag_*`` columns and the value
+    reported are two different roles. By default (``state_model=None``) both are
+    the same — ``model``'s own prediction is fed back. But ``model`` predicts a
+    high quantile (e.g. peak q=0.75), and recursively feeding a high quantile
+    back into its own lags makes the conservative margin **compound** over the
+    horizon (the forecast drifts up and never settles to the overnight trough).
+    Quantiles do not propagate linearly through the AR recursion.
+
+    When ``state_model`` is given (a median / q=0.5 model trained on the same
+    features), the lag columns are seeded from *its* prediction — the conditional
+    median, a stable central estimate — while the **reported** value still comes
+    from ``model`` (the conservative quantile). This decouples the AR state from
+    the reported quantile: the trajectory propagates at the median (no upward
+    drift) but each reported hour keeps its quantile margin.
+
     Args:
         X_test:       Test feature matrix.
         y_test:       Test target vector (used for evaluation by caller).
-        model:        Trained QuantileRegressionModel.
+        model:        Trained QuantileRegressionModel (reported quantile).
         features:     List of feature names corresponding to columns of X_test.
         n_power_lags: Number of power lag features in the model.
-        hours_test:   Hour-of-day values for dynamic quantile (optional).
+        hours_test:   Hour-of-day values for dynamic quantile (optional). Passed
+                      to both ``model`` and ``state_model``.
+        state_model:  Optional median model whose predictions seed the lag
+                      columns. ``None`` feeds ``model``'s own predictions back
+                      (legacy behaviour).
 
     Returns:
         Dict with keys:
-            'predictions': np.ndarray of predicted values.
+            'predictions': np.ndarray of predicted (reported) values.
             'iterative':   bool — True if auto-regressive loop was used.
     """
     n_samples = len(X_test)
     predictions = np.zeros(n_samples, dtype=np.float64)
+    # Values fed into the lag columns of later rows. Equals ``predictions`` when
+    # no state_model is given; otherwise the median model's stable estimate.
+    lag_values = np.zeros(n_samples, dtype=np.float64)
 
     # Indices of power-lag columns inside the feature matrix.
     power_lag_indices = [i for i, feat in enumerate(features) if 'power_lag' in feat]
@@ -451,17 +476,21 @@ def predict_iterative(
             'iterative': False,
         }
 
-    # Auto-regressive loop: update lag columns with previous predictions.
+    # Auto-regressive loop: update lag columns from the previous state values.
     for i in range(n_samples):
         X_current = X_test[i: i + 1].copy()
 
         if i > 0:
             for lag_order, feat_idx in enumerate(power_lag_indices, start=1):
                 if i >= lag_order:
-                    X_current[0, feat_idx] = predictions[i - lag_order]
+                    X_current[0, feat_idx] = lag_values[i - lag_order]
 
         hour_current = None if hours_test is None else hours_test[i: i + 1]
         predictions[i] = model.predict(X_current, hour_current)[0]
+        lag_values[i] = (
+            predictions[i] if state_model is None
+            else state_model.predict(X_current, hour_current)[0]
+        )
 
     return {
         'predictions': predictions,

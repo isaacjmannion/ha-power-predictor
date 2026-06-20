@@ -108,6 +108,32 @@ def test_predict_iterative_feeds_predictions_into_power_lag():
     assert np.allclose(result["predictions"], [7.0, 7.0, 7.0, 7.0])
 
 
+def test_predict_iterative_state_model_seeds_lags_not_reported_value():
+    """With a state_model, lags are seeded from IT (the median), not the
+    reported value — so the reported trajectory follows the state, decoupling
+    the AR state from the conservative quantile (no upward compounding)."""
+
+    class Echo:
+        """Reports the power_lag_1 feature it is given."""
+
+        def predict(self, x, hours=None):
+            return np.array([x[0, 0]])
+
+    class ConstState:
+        """Stand-in median model: always feeds 2.0 into the lags."""
+
+        def predict(self, x, hours=None):
+            return np.array([2.0])
+
+    x = np.array([[7.0], [0.0], [0.0], [0.0]])
+    result = models.predict_iterative(
+        x, np.zeros(4), Echo(), ["power_lag_1"], 1, state_model=ConstState()
+    )
+    # Step 0 reports the 7.0 seed but feeds the state's 2.0 forward; every later
+    # step then sees 2.0 in its lag. (Legacy self-feedback would give all 7.0.)
+    assert np.allclose(result["predictions"], [7.0, 2.0, 2.0, 2.0])
+
+
 # --- Per-feature ridge weighting -------------------------------------------
 
 def test_reg_weights_of_one_reproduce_uniform_alpha():

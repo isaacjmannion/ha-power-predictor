@@ -72,12 +72,13 @@ def _metrics(actual, preds):
     }
 
 
-def eval_combo(full, dyn, origins, horizon, hd, harm, npl, wlag, wtemp):
+def eval_combo(full, dyn, origins, horizon, hd, harm, npl, wlag, wtemp, tz=None):
     hist = hd * 24
     feats = (dp.get_default_features(harm)
              + [f"power_lag_{i}" for i in range(1, npl + 1)]
              + [f"temp_lag_{i}" for i in range(1, N_TEMP_LAGS + 1)])
     fw = dp.build_feature_weights(feats, {"time": WEIGHT_TIME, "temperature": wtemp, "lags": wlag})
+    median_dyn = {**dyn, "peak_quantile": 0.5, "offpeak_quantile": 0.5}
     rmses, covs, sharps, corrs = [], [], [], []
     for o in origins:
         if o - hist < 0:
@@ -86,13 +87,21 @@ def eval_combo(full, dyn, origins, horizon, hd, harm, npl, wlag, wtemp):
         sl = dp.add_cyclical_features(dp.add_lagged_features(sl, npl, N_TEMP_LAGS), harm)
         if len(sl) <= horizon + c.MIN_TRAINING_SAMPLES:
             continue
+        # Local-hour routing + median feedback, matching the integration.
+        hours = (sl["timestamp"].dt.tz_convert(tz).dt.hour.to_numpy() if tz
+                 else sl["hour"].to_numpy())
         tr, ho = sl.iloc[:-horizon], sl.iloc[-horizon:]
+        h_train, h_hold = hours[:-horizon], hours[-horizon:]
         model = m.QuantileRegressionModel(
             dynamic_config=dyn, alpha=ALPHA, feature_weights=fw, standardize=True,
         )
-        model.train(tr[feats].values, tr["consumption"].values, tr["hour"].values)
+        model.train(tr[feats].values, tr["consumption"].values, h_train)
+        state_model = m.QuantileRegressionModel(
+            dynamic_config=median_dyn, alpha=ALPHA, feature_weights=fw, standardize=True,
+        )
+        state_model.train(tr[feats].values, tr["consumption"].values, h_train)
         res = m.predict_iterative(ho[feats].values, np.zeros(len(ho)), model, feats, npl,
-                                  hours_test=ho["hour"].values)
+                                  hours_test=h_hold, state_model=state_model)
         met = _metrics(ho["consumption"].values, res["predictions"])
         rmses.append(met["rmse"])
         covs.append(met["cov"])
@@ -121,6 +130,7 @@ def main(argv=None):
 
     payload = json.loads(Path(args.export).read_text(encoding="utf-8"))
     cfg = dict(payload.get("config", {}))
+    tz = payload.get("meta", {}).get("timezone")  # local-hour routing parity
     full = dp.process_ha_statistics(payload["power_stats"], payload["temperature_stats"])
     n = len(full)
     dyn = {
@@ -140,7 +150,7 @@ def main(argv=None):
     rows = []
     with contextlib.redirect_stdout(io.StringIO()):  # silence the model's per-fit prints
         for hd, harm, npl, wlag, wtemp in itertools.product(*SWEEP_GRID.values()):
-            r = eval_combo(full, dyn, origins, args.horizon, hd, harm, npl, wlag, wtemp)
+            r = eval_combo(full, dyn, origins, args.horizon, hd, harm, npl, wlag, wtemp, tz=tz)
             if r:
                 rows.append(r)
 

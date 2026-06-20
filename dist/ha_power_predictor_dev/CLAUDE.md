@@ -41,8 +41,12 @@ linear `"hour"`). The coordinator appends `power_lag_1..n_power_lags` then
 `temp_lag_1..n_temp_lags`. The cyclical columns are added by
 `add_cyclical_features` (a pure function of `hour`) on **both** the training df
 and the future df, so historical and future frames encode identically. The raw
-`hour` column is kept in the DataFrame regardless — it is passed separately to
-`train`/`predict`/`predict_iterative` for peak/off-peak routing.
+`hour` column is kept in the DataFrame regardless (it is the cyclical-feature
+source, and the linear `hour` feature when `hour_harmonics=0`). For peak/off-peak
+routing, the coordinator does **not** pass this UTC `hour` — it derives a
+**local** hour-of-day from the timestamps (`tz_convert(...).dt.hour`) and passes
+that to `train`/`predict`/`predict_iterative`, so the peak window is the user's
+local clock. See the "Times are UTC inside the pipeline" note in the repo CLAUDE.md.
 
 The model is trained and predicts on `df[features].values` in this exact column
 order, and `predict_iterative` finds the power-lag columns by substring
@@ -103,14 +107,24 @@ do **not** (see "Hour-of-day offsets" below).
 - **Dynamic peak/off-peak:** when `dynamic_config` is provided (it always is from
   the coordinator), `train` fits **two separate models** — one on hours where
   `peak_start <= hour <= peak_end`, one on the rest — and `predict` routes each
-  row to the matching model by hour. The static single-quantile path
-  (`self._coeffs`) still exists for `dynamic_config=None` but the coordinator
-  does not use it.
+  row to the matching model by the `hours` array it is given (the coordinator
+  passes **local** hour-of-day, so the window is the user's local clock). The
+  static single-quantile path (`self._coeffs`) still exists for
+  `dynamic_config=None` but the coordinator does not use it.
 - **Auto-regressive forecasting (`predict_iterative`):** future power lags are
-  unknown, so it steps row-by-row, writing each prediction back into the
-  `power_lag_*` columns of subsequent rows. If there are **no** power-lag
-  features it short-circuits to a single vectorised `model.predict`. Temperature
-  lags are *not* updated here — they're pre-seeded correctly in `_build_future_df`.
+  unknown, so it steps row-by-row, writing a value back into the `power_lag_*`
+  columns of subsequent rows. If there are **no** power-lag features it
+  short-circuits to a single vectorised `model.predict`. Temperature lags are
+  *not* updated here — they're pre-seeded correctly in `_build_future_df`.
+  - **`state_model` (median feedback):** the value fed *into* the lags and the
+    value *reported* are decoupled. Reporting uses `model` (the conservative
+    quantile); the lags are seeded from the optional `state_model` (a q=0.5
+    median model the coordinator also trains). Recursively feeding a high
+    quantile back into its own lags compounds the margin and drifts the forecast
+    up over the horizon — propagating the median instead keeps the trajectory
+    stable while each reported hour still carries its quantile margin.
+    `state_model=None` feeds `model`'s own predictions back (legacy behaviour;
+    preserved for the bare-solver unit tests).
 - `train`/`_train_dynamic` use `print(...)` for progress (visible in HA logs
   when training runs in the executor) — not the module logger. Leave as-is unless
   intentionally changing logging.

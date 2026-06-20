@@ -224,6 +224,17 @@ class PowerPredictorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # penalty on the standardized fit.
         feature_weights = build_feature_weights(features, group_weights)
 
+        # Peak/off-peak routing keys off the **local** hour-of-day, not UTC. The
+        # rest of the pipeline stays UTC (the cyclical `hour` feature, calendar
+        # columns, prediction timestamps), but peak_start/peak_end are the user's
+        # local clock hours — so the conservative peak quantile lands on their
+        # actual local peak window rather than a UTC-shifted one. Mirrors the
+        # hour-of-day offset lookup (dt_util.as_local(...).hour). Converting each
+        # timestamp individually keeps it correct across DST. See the package
+        # CLAUDE.md timezone notes.
+        local_tz = dt_util.get_default_time_zone()
+        hours_local = df["timestamp"].dt.tz_convert(local_tz).dt.hour.to_numpy()
+
         # ── Step 5: Train on full dataset ────────────────────────────────────
         _LOGGER.debug("Training quantile regression model on %d samples", len(df))
         model = QuantileRegressionModel(
@@ -232,11 +243,34 @@ class PowerPredictorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             feature_weights=feature_weights,
             standardize=True,
         )
+        # State (median) model for stable auto-regressive feedback: it seeds the
+        # power-lag columns during iterative inference so the trajectory
+        # propagates at the conditional median instead of recursively compounding
+        # the conservative quantile (which otherwise drifts the forecast up over
+        # the horizon — see predict_iterative). It mirrors `model`'s features /
+        # weights / routing but forces q=0.5 in both periods.
+        median_dynamic_config = {
+            **dynamic_config,
+            "peak_quantile": 0.5,
+            "offpeak_quantile": 0.5,
+        }
+        state_model = QuantileRegressionModel(
+            dynamic_config=median_dynamic_config,
+            alpha=reg_alpha,
+            feature_weights=feature_weights,
+            standardize=True,
+        )
         await self.hass.async_add_executor_job(
             model.train,
             df[features].values,
             df["consumption"].values,
-            df["hour"].values,
+            hours_local,
+        )
+        await self.hass.async_add_executor_job(
+            state_model.train,
+            df[features].values,
+            df["consumption"].values,
+            hours_local,
         )
 
         # ── Step 5b: In-sample fitted values ────────────────────────────────
@@ -245,7 +279,7 @@ class PowerPredictorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         fitted_raw: np.ndarray = await self.hass.async_add_executor_job(
             model.predict,
             df[features].values,
-            df["hour"].values,
+            hours_local,
         )
         fitted_coverage: float = float(
             np.mean(df["consumption"].values <= fitted_raw) * 100
@@ -279,6 +313,13 @@ class PowerPredictorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
 
         # ── Step 7: Generate predictions ─────────────────────────────────────
+        # Local hour-of-day for peak/off-peak routing (see Step 5) — keep the
+        # routing basis identical for the future and training frames. The median
+        # state_model seeds the power lags so the auto-regressive trajectory does
+        # not compound the conservative quantile over the horizon.
+        future_hours_local = (
+            df_future["timestamp"].dt.tz_convert(local_tz).dt.hour.to_numpy()
+        )
         _LOGGER.debug("Generating %d-hour iterative predictions", max_forecast_hours)
         future_result = await self.hass.async_add_executor_job(
             predict_iterative,
@@ -287,7 +328,8 @@ class PowerPredictorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             model,
             features,
             n_power_lags,
-            df_future["hour"].values,
+            future_hours_local,
+            state_model,
         )
 
         raw_preds: np.ndarray = future_result["predictions"]

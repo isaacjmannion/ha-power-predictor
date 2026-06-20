@@ -59,11 +59,15 @@ interval) and on demand (the "Train Now" button). On each run
    hour-of-day features (`add_cyclical_features`).
 5. Trains a `QuantileRegressionModel` (separate peak/off-peak models) on
    standardized features, with a per-feature ridge penalty from the configured
-   influence weights (`build_feature_weights`).
+   influence weights (`build_feature_weights`). Peak/off-peak routing uses the
+   **local** hour-of-day. Also trains a second q=0.5 `state_model` (the median),
+   used to seed the lag columns during forecasting.
 6. Computes in-sample fitted values + coverage % for charting.
 7. Builds a future feature matrix out to `max_forecast_hours` (`_build_future_df`).
-8. Generates predictions auto-regressively (`predict_iterative`), then adds any
-   configured per-hour offsets (still clamped to min/max power).
+8. Generates predictions auto-regressively (`predict_iterative`), feeding the
+   `state_model`'s median back into the power lags (so the conservative quantile
+   does not compound over the horizon) while reporting the quantile model, then
+   adds any configured per-hour offsets (still clamped to min/max power).
 9. Returns a dict that the sensor entities read.
 
 The sensors (`sensor.py`) are thin `CoordinatorEntity` wrappers — they hold no
@@ -95,10 +99,11 @@ just calls `coordinator.async_request_refresh()` on press.
   flow no longer exposes — peak/off-peak quantiles are always active).
 - **Times are UTC inside the pipeline; local only at the edge.** Statistics,
   features, and prediction timestamps are UTC-aware throughout, and the model's
-  `hour` feature plus the peak/off-peak window key off **UTC** hours. Two places
-  use **local** time: `sensor.py` (display attributes) and the **hour-of-day
-  offset** lookup (`dt_util.as_local(ts).hour`, so an offset for hour 13 lands at
-  1 pm on the user's clock). See the package CLAUDE.md "Hour-of-day offsets".
+  cyclical `hour` feature keys off **UTC** hours. Three places use **local**
+  time: `sensor.py` (display attributes), the **hour-of-day offset** lookup, and
+  the **peak/off-peak routing** (`dt_util.as_local(ts).hour` / `tz_convert`, so
+  an offset or a peak window for hour 13 lands at 1 pm on the user's clock). See
+  the package CLAUDE.md "Hour-of-day offsets".
 - **No new heavy dependencies.** The model is deliberately pure-numpy (no
   scikit-learn / scipy) so the integration stays light. Declared requirements
   are `numpy>=1.24.0` and `pandas>=2.0.0`, set in `manifest.json` — the single

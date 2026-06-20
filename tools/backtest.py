@@ -90,7 +90,15 @@ def _metrics(actual: np.ndarray, preds: np.ndarray) -> dict:
     }
 
 
-def backtest(df, features, config, horizon: int) -> dict:
+def _routing_hours(df, tz):
+    """Local hour-of-day for peak/off-peak routing (UTC fallback if no tz),
+    mirroring the integration (coordinator.py)."""
+    if tz:
+        return df["timestamp"].dt.tz_convert(tz).dt.hour.to_numpy()
+    return df["hour"].to_numpy()
+
+
+def backtest(df, features, config, horizon: int, tz=None) -> dict:
     """Train on all but the last `horizon` hours, forecast them, score them."""
     if len(df) <= horizon + c.MIN_TRAINING_SAMPLES:
         raise ValueError(
@@ -117,6 +125,8 @@ def backtest(df, features, config, horizon: int) -> dict:
 
     train_df = df.iloc[:-horizon]
     hold_df = df.iloc[-horizon:]
+    hours = _routing_hours(df, tz)            # local-hour routing, like production
+    h_train, h_hold = hours[:-horizon], hours[-horizon:]
 
     model = m.QuantileRegressionModel(
         dynamic_config=dynamic_config,
@@ -124,22 +134,30 @@ def backtest(df, features, config, horizon: int) -> dict:
         feature_weights=feature_weights,
         standardize=True,
     )
-    model.train(
-        train_df[features].values,
-        train_df["consumption"].values,
-        train_df["hour"].values,
+    model.train(train_df[features].values, train_df["consumption"].values, h_train)
+
+    # Median state model: seeds the power lags so the AR forecast propagates the
+    # median (not the conservative quantile) — matches the integration.
+    state_model = m.QuantileRegressionModel(
+        dynamic_config={**dynamic_config, "peak_quantile": 0.5, "offpeak_quantile": 0.5},
+        alpha=alpha,
+        feature_weights=feature_weights,
+        standardize=True,
     )
+    state_model.train(train_df[features].values, train_df["consumption"].values, h_train)
 
     # Auto-regressive forecast over the holdout. The lag columns of hold_df were
     # computed over the full series, so the first rows are seeded with real
-    # recent actuals (as in production); predict_iterative then self-feeds.
+    # recent actuals (as in production); predict_iterative then propagates the
+    # state model's median through the lags.
     result = m.predict_iterative(
         hold_df[features].values,
         np.zeros(len(hold_df)),
         model,
         features,
         n_power_lags,
-        hours_test=hold_df["hour"].values,
+        hours_test=h_hold,
+        state_model=state_model,
     )
     return _metrics(hold_df["consumption"].values, result["predictions"])
 
@@ -153,7 +171,9 @@ SWEEP_GRID = {
 }
 
 
-def sweep(power_stats, temp_stats, base_config, horizon, history_days, grid) -> pd.DataFrame:
+def sweep(
+    power_stats, temp_stats, base_config, horizon, history_days, grid, tz=None
+) -> pd.DataFrame:
     """Backtest every combination in `grid`, ranked by RMSE (best first)."""
     keys = list(grid)
     rows = []
@@ -164,7 +184,7 @@ def sweep(power_stats, temp_stats, base_config, horizon, history_days, grid) -> 
         row = {key: config[key] for key in keys}
         try:
             df, features = build_frame(power_stats, temp_stats, config, history_days)
-            row.update(backtest(df, features, config, horizon))
+            row.update(backtest(df, features, config, horizon, tz=tz))
         except Exception as exc:  # keep sweeping if one combo fails
             row.update({"mae": float("nan"), "rmse": float("nan"),
                         "coverage_pct": float("nan"), "sharpness": float("nan"),
@@ -195,15 +215,17 @@ def main(argv=None) -> None:
         f"Loaded {meta.get('n_power_rows')} power / {meta.get('n_temperature_rows')} "
         f"temperature rows (exported {meta.get('exported_at')}, v{meta.get('version')})"
     )
+    tz = meta.get("timezone")  # peak/off-peak routing uses local time (production parity)
     print(
         f"  power source:       {meta.get('power_entity')} ({meta.get('power_entity_name')})\n"
         f"  temperature source: {meta.get('temperature_entity')} "
-        f"({meta.get('temperature_entity_name')})"
+        f"({meta.get('temperature_entity_name')})\n"
+        f"  routing timezone:   {tz or 'UTC (no tz in export)'}"
     )
 
     if args.sweep:
         results = sweep(
-            power_stats, temp_stats, base_config, args.horizon, args.history_days, SWEEP_GRID
+            power_stats, temp_stats, base_config, args.horizon, args.history_days, SWEEP_GRID, tz=tz
         )
         pd.set_option("display.width", 200)
         pd.set_option("display.max_columns", None)
@@ -211,7 +233,7 @@ def main(argv=None) -> None:
         print(results.to_string(index=False))
     else:
         df, features = build_frame(power_stats, temp_stats, base_config, args.history_days)
-        metrics = backtest(df, features, base_config, args.horizon)
+        metrics = backtest(df, features, base_config, args.horizon, tz=tz)
         print(f"\nBacktest (exported config, horizon={args.horizon}h):")
         for key, value in metrics.items():
             print(f"  {key:>14}: {value:.4f}")
