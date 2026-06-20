@@ -34,3 +34,18 @@ jobs:
           # We are not registered in the Home Assistant brands repo, so skip
           # that specific check (icons ship in the integration's brand/ folder).
           ignore: brands
+
+  dev-fork-sync:
+    # The committed dev A/B fork (dist/ha_power_predictor_dev) is a domain-renamed
+    # copy of the integration. This fails if someone changed the integration
+    # without regenerating the fork — run `python tools/build_dev_fork.py` to fix.
+    # Stdlib only, so no dependencies to install.
+    name: Dev fork in sync
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Check dev fork is up to date with source
+        run: python tools/build_dev_fork.py --check
