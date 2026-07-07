@@ -224,14 +224,17 @@ class PowerPredictorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # penalty on the standardized fit.
         feature_weights = build_feature_weights(features, group_weights)
 
-        # Peak/off-peak routing keys off the **local** hour-of-day, not UTC. The
-        # rest of the pipeline stays UTC (the cyclical `hour` feature, calendar
-        # columns, prediction timestamps), but peak_start/peak_end are the user's
-        # local clock hours — so the conservative peak quantile lands on their
-        # actual local peak window rather than a UTC-shifted one. Mirrors the
-        # hour-of-day offset lookup (dt_util.as_local(...).hour). Converting each
-        # timestamp individually keeps it correct across DST. See the package
-        # CLAUDE.md timezone notes.
+        # The peak/off-peak quantile assignment keys off the **local**
+        # hour-of-day, not UTC. The rest of the pipeline stays UTC (the
+        # cyclical `hour` feature, calendar columns, prediction timestamps),
+        # but peak_start/peak_end are the user's local clock hours — so the
+        # conservative peak quantile lands on their actual local peak window
+        # rather than a UTC-shifted one. Mirrors the hour-of-day offset lookup
+        # (dt_util.as_local(...).hour). Converting each timestamp individually
+        # keeps it correct across DST. The window only selects each TRAINING
+        # sample's quantile inside one shared fit — prediction itself is a
+        # single continuous surface with no hour routing (see models.py). See
+        # the package CLAUDE.md timezone notes.
         local_tz = dt_util.get_default_time_zone()
         hours_local = df["timestamp"].dt.tz_convert(local_tz).dt.hour.to_numpy()
 
@@ -313,10 +316,11 @@ class PowerPredictorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
 
         # ── Step 7: Generate predictions ─────────────────────────────────────
-        # Local hour-of-day for peak/off-peak routing (see Step 5) — keep the
-        # routing basis identical for the future and training frames. The median
-        # state_model seeds the power lags so the auto-regressive trajectory does
-        # not compound the conservative quantile over the horizon.
+        # Local hour-of-day for the future frame. The peak/off-peak asymmetry
+        # is baked into the coefficients at training time, so predict ignores
+        # these hours — they are passed through for API stability. The median
+        # state_model seeds the power lags so the auto-regressive trajectory
+        # does not compound the conservative quantile over the horizon.
         future_hours_local = (
             df_future["timestamp"].dt.tz_convert(local_tz).dt.hour.to_numpy()
         )

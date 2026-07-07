@@ -57,11 +57,14 @@ interval) and on demand (the "Train Now" button). On each run
 3. Processes the statistics into a feature DataFrame (`process_ha_statistics`).
 4. Adds auto-regressive lag features (`add_lagged_features`) and cyclical
    hour-of-day features (`add_cyclical_features`).
-5. Trains a `QuantileRegressionModel` (separate peak/off-peak models) on
-   standardized features, with a per-feature ridge penalty from the configured
-   influence weights (`build_feature_weights`). Peak/off-peak routing uses the
-   **local** hour-of-day. Also trains a second q=0.5 `state_model` (the median),
-   used to seed the lag columns during forecasting.
+5. Trains a `QuantileRegressionModel` on standardized features — **one** IRLS
+   fit in which each training sample gets its window's quantile (peak vs
+   off-peak, by **local** hour-of-day) inside the pinball loss, with a
+   per-feature ridge penalty from the configured influence weights
+   (`build_feature_weights`). One coefficient set means the prediction curve
+   is continuous (no step at the window boundaries). Also trains a second
+   q=0.5 `state_model` (the median), used to seed the lag columns during
+   forecasting.
 6. Computes in-sample fitted values + coverage % for charting.
 7. Builds a future feature matrix out to `max_forecast_hours` (`_build_future_df`).
 8. Generates predictions auto-regressively (`predict_iterative`), feeding the

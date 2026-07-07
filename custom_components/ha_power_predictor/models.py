@@ -1,6 +1,7 @@
 """
 Quantile Regression model for power consumption prediction.
-Supports both standard and dynamic peak/off-peak quantile modeling.
+Supports a fixed quantile, or per-sample (peak/off-peak) quantiles in a
+single fit.
 
 Pure numpy implementation — no scikit-learn dependency.
 Uses Iteratively Reweighted Least Squares (IRLS) to solve the quantile
@@ -12,14 +13,23 @@ Algorithm overview (IRLS for quantile regression):
     The pinball (quantile) loss rho_q(r) is non-differentiable at r=0 but
     can be iteratively approximated as a weighted least squares problem:
 
-        w_i = q / |r_i|      if r_i >= 0  (under-prediction, penalised by q)
-        w_i = (1-q) / |r_i|  if r_i <  0  (over-prediction, penalised by 1-q)
+        w_i = q_i / |r_i|      if r_i >= 0  (under-prediction, penalised by q_i)
+        w_i = (1-q_i) / |r_i|  if r_i <  0  (over-prediction, penalised by 1-q_i)
+
+    q_i may be one shared quantile or vary per sample (e.g. a higher, more
+    conservative quantile during peak hours — still one coefficient set, so
+    the fitted surface stays continuous across the window boundary).
 
     At each iteration we solve:
-        (X'WX + αI) β = X'Wy
+        (X'WX + reg) β = X'Wy
 
-    where W = diag(w_i) and α is L2 regularisation. This converges in
-    typically 20–50 iterations for datasets of this size.
+    where W = diag(w_i). The |r| in the weights is floored at 0.1% of the
+    response dispersion (a Huber-smoothed pinball loss), and the L2 ridge is
+    made dimensionless by the same dispersion (reg_j = n·α / (s·w_j²)), so the
+    iteration is a monotone majorize-minimize descent on one fixed strictly
+    convex objective, and a given alpha produces comparable smoothing across
+    homes, units, and history lengths. Converges in typically 10–50
+    iterations for datasets of this size.
 """
 
 import logging
@@ -37,7 +47,7 @@ logger = logging.getLogger(__name__)
 def _fit_quantile_irls(
     X: np.ndarray,
     y: np.ndarray,
-    quantile: float,
+    quantile,
     alpha: float = 0.01,
     max_iter: int = 200,
     tol: float = 1e-6,
@@ -50,24 +60,41 @@ def _fit_quantile_irls(
         X:        Feature matrix, shape (n_samples, n_features). Should be
                   pre-scaled if features are on different scales.
         y:        Target vector, shape (n_samples,).
-        quantile: Target quantile in (0, 1).
-        alpha:    L2 regularisation strength (matches sklearn's alpha=0.01
-                  default). Applied to all coefficients except the intercept.
+        quantile: Target quantile in (0, 1) — a float, or an array of shape
+                  (n_samples,) assigning each sample its own quantile (e.g. a
+                  higher quantile for peak-hour samples). A per-sample quantile
+                  changes only the loss asymmetry: there is still one
+                  coefficient set, so predictions stay continuous in the
+                  features with no regime boundaries.
+        alpha:    L2 regularisation strength, applied to all coefficients
+                  except the intercept. Anchored to the response dispersion
+                  (see the objective note in the body), so it is a live,
+                  monotone smoothing knob whose strength is comparable across
+                  data scales and history lengths: ~0.1 smooths lightly,
+                  ~1 visibly, ~3 strongly.
         max_iter: Maximum number of IRLS iterations.
         tol:      Convergence tolerance on max absolute coefficient change.
         reg_weights: Optional per-feature influence weights, length n_features.
                   When given, feature j's penalty becomes ``alpha / w_j**2`` — a
                   larger weight means a smaller penalty and therefore more
                   influence (equivalent, in predictions, to scaling column j by
-                  w_j under a uniform penalty). ``None`` keeps the uniform alpha
-                  penalty. Only meaningful when X is standardized and alpha is
-                  non-trivial.
+                  w_j under a uniform penalty); a 0 weight drives the feature
+                  to ~0 influence. ``None`` keeps the uniform alpha penalty.
+                  Meaningful relative to each other on standardized features
+                  with a non-trivial alpha.
 
     Returns:
         coeffs: 1-D array of length (n_features + 1). coeffs[0] is the
                 intercept; coeffs[1:] are feature weights.
     """
     n, p = X.shape
+
+    q = np.asarray(quantile, dtype=np.float64)
+    if q.ndim > 0 and q.shape[0] != n:
+        raise ValueError(
+            f"per-sample quantile length {q.shape[0]} does not match "
+            f"n_samples {n}"
+        )
 
     # Augment X with a leading ones column for the intercept.
     Xa = np.empty((n, p + 1), dtype=np.float64)
@@ -80,19 +107,43 @@ def _fit_quantile_irls(
     # -----------------------------------------------------------------------
     coeffs, *_ = np.linalg.lstsq(Xa, y, rcond=None)
 
-    # Regularisation diagonal: skip the intercept term (index 0). With
-    # per-feature weights, feature j's penalty is alpha / w_j**2 (a larger
-    # weight -> smaller penalty -> more influence). A small floor on the weight
-    # turns a 0 weight into a very large (finite) penalty, so the feature is
-    # driven to ~0 influence without an inf/NaN in the normal equations.
-    reg_diag = np.full(p + 1, alpha)
+    # The solve minimizes a FIXED, strictly convex objective:
+    #
+    #     F(β) = Σ ρ_smooth,q(y - Xaβ)  +  ½ Σ_j reg_j β_j²
+    #
+    # where ρ_smooth is the pinball loss smoothed within ±floor (quadratic
+    # inside the band, linear outside — the classic Huberized quantile loss),
+    # and each IRLS iteration is a majorize-minimize step on F. Because the
+    # objective never moves between iterations, the descent is monotone and
+    # deterministic — no orbits, no path-dependent fits. Both the smoothing
+    # band and the penalty are anchored to the RESPONSE DISPERSION
+    #
+    #     s = mean |y - median(y)|
+    #
+    # a fixed scale that never degenerates with fit quality:
+    #   - floor = 1e-3·s caps any IRLS weight at ~1e3x the typical weight, so
+    #     the handful of samples the fit interpolates can no longer swamp the
+    #     ridge (which silently disabled alpha and the influence weights), and
+    #     the quantile is biased only within ~0.1% of the target's spread;
+    #   - reg_j = n·alpha / (s·w_j²) makes the penalty dimensionless: the
+    #     weighted Gram of a standardized column scales like n/s, so the
+    #     shrinkage a given alpha produces is comparable across homes, units,
+    #     and history lengths. alpha stays a live, monotone, portable knob.
+    # A larger influence weight w_j means a smaller penalty and therefore
+    # more influence; the small floor on w_j turns a 0 weight into a very
+    # large (finite) penalty, driving the feature to ~0 influence without an
+    # inf/NaN in the normal equations.
+    _eps = 1e-8
+    y_scale = float(np.mean(np.abs(y - np.median(y))))
+    if y_scale < _eps:
+        y_scale = max(float(np.mean(np.abs(y))), 1.0)
+    floor = max(_eps, 1e-3 * y_scale)
+
+    reg_diag = np.full(p + 1, n * alpha / y_scale)
     reg_diag[0] = 0.0
     if reg_weights is not None:
         w = np.maximum(np.abs(np.asarray(reg_weights, dtype=np.float64)), 1e-6)
-        reg_diag[1:] = alpha / (w ** 2)
-
-    # A small floor prevents division-by-zero when a residual is exactly 0.
-    _eps = 1e-8
+        reg_diag[1:] = n * alpha / (y_scale * w ** 2)
 
     for iteration in range(max_iter):
         coeffs_prev = coeffs.copy()
@@ -100,13 +151,15 @@ def _fit_quantile_irls(
         # Residuals under the current estimate.
         residuals = y - Xa @ coeffs
 
-        # Asymmetric IRLS weights derived from the pinball loss subgradient.
-        abs_res = np.maximum(np.abs(residuals), _eps)
+        # Asymmetric IRLS weights derived from the pinball loss subgradient
+        # (the exact MM majorizer of the smoothed pinball). q broadcasts
+        # whether it is a scalar or a per-sample vector.
+        abs_res = np.maximum(np.abs(residuals), floor)
         weights = np.where(residuals >= 0,
-                           quantile / abs_res,
-                           (1.0 - quantile) / abs_res)
+                           q / abs_res,
+                           (1.0 - q) / abs_res)
 
-        # Weighted normal equations:  (Xa' W Xa + αI) β = Xa' W y
+        # Weighted normal equations:  (Xa' W Xa + reg) β = Xa' W y
         # Multiply each row of Xa by its weight without forming a dense W matrix.
         XaW = Xa.T * weights          # shape (p+1, n)
         A = XaW @ Xa                  # shape (p+1, p+1)
@@ -188,21 +241,31 @@ class QuantileRegressionModel:
     ):
         """
         Args:
-            quantile: Quantile to predict (0.5–0.99).
+            quantile: Quantile to predict (0.5–0.99). Used when
+                ``dynamic_config`` is not given (or no hours are supplied).
             dynamic_config: Optional dict for peak/off-peak modelling:
                 - peak_start:       Hour when peak period begins (e.g. 9)
                 - peak_end:         Hour when peak period ends   (e.g. 22)
                 - peak_quantile:    Quantile for peak hours      (e.g. 0.75)
                 - offpeak_quantile: Quantile for off-peak hours  (e.g. 0.50)
+                Implemented as ONE fit with a per-sample quantile (each
+                training sample is assigned its window's quantile inside the
+                pinball loss). A single coefficient set means the prediction
+                surface is continuous — no separate sub-models, no
+                discontinuity at the window boundaries, and no risk of an
+                unfittable (empty) window.
             alpha: L2 regularisation strength passed to the IRLS solver.
+                Anchored to the response dispersion, so it is a live,
+                monotone smoothing knob with comparable strength across
+                homes and history lengths: ~0.1 light, ~1 visible, ~3 strong.
             feature_weights: Optional per-feature influence weights (length =
                 n_features), applied as the per-feature ridge penalty
-                ``alpha / w_j**2``. Requires ``standardize=True`` and a
-                non-trivial ``alpha`` to have a meaningful, comparable effect.
+                ``alpha / w_j**2``. Use with ``standardize=True`` and a
+                non-trivial ``alpha`` for a meaningful, comparable effect.
             standardize: When True, z-score the feature matrix on the training
-                statistics and reuse those stats at predict time. This makes the
-                uniform penalty act uniformly across features and is a
-                prerequisite for ``feature_weights`` to behave predictably.
+                statistics and reuse those stats at predict time. This makes
+                the penalty (and the influence weights) act uniformly across
+                features and conditions the solve.
         """
         self.quantile = quantile
         self.dynamic_config = dynamic_config
@@ -218,11 +281,10 @@ class QuantileRegressionModel:
         self._mu: Optional[np.ndarray] = None
         self._sigma: Optional[np.ndarray] = None
 
-        # Fitted state: single model or per-period models.
-        # Each entry is a coefficient vector from _fit_quantile_irls.
+        # Fitted state: one coefficient vector from _fit_quantile_irls (also
+        # for peak/off-peak fits — the window asymmetry lives in the loss, not
+        # in separate coefficient sets).
         self._coeffs: Optional[np.ndarray] = None
-        self._coeffs_peak: Optional[np.ndarray] = None
-        self._coeffs_offpeak: Optional[np.ndarray] = None
 
     # ------------------------------------------------------------------
     # Standardization
@@ -275,55 +337,38 @@ class QuantileRegressionModel:
                 f"match feature count {X_train.shape[1]}"
             )
 
-        # Fit the scaler on the FULL training matrix, then standardize once so
-        # both peak/off-peak sub-models share the same scaling.
+        # Fit the scaler on the FULL training matrix, then standardize once.
         self._fit_scaler(X_train)
         Xs = self._apply_scaler(X_train)
 
         if self.dynamic_config is not None and hours_train is not None:
-            print("  - Training Dynamic Quantile Regression (IRLS)...")
-            self._train_dynamic(Xs, y_train, hours_train)
+            # Peak/off-peak in ONE fit: each sample gets its window's quantile
+            # inside the pinball loss. The hour features (not separate
+            # coefficient sets) carry the level difference between windows, so
+            # the fitted surface has no boundary discontinuity.
+            peak_start = self.dynamic_config['peak_start']
+            peak_end = self.dynamic_config['peak_end']
+            hours_arr = np.asarray(hours_train)
+            peak_mask = (hours_arr >= peak_start) & (hours_arr <= peak_end)
+            q_vec = np.where(
+                peak_mask,
+                self.dynamic_config['peak_quantile'],
+                self.dynamic_config['offpeak_quantile'],
+            )
+            print(f"  - Training Quantile Regression (single fit, IRLS): "
+                  f"q={self.dynamic_config['peak_quantile']:.2f} on "
+                  f"{int(peak_mask.sum())} peak samples ({peak_start}–{peak_end}), "
+                  f"q={self.dynamic_config['offpeak_quantile']:.2f} on "
+                  f"{int((~peak_mask).sum())} off-peak samples")
+            self._coeffs = _fit_quantile_irls(
+                Xs, y_train, q_vec, self.alpha,
+                reg_weights=self.feature_weights,
+            )
         else:
             print(f"  - Training Quantile Regression (q={self.quantile:.2f}, IRLS)...")
             self._coeffs = _fit_quantile_irls(
                 Xs, y_train, self.quantile, self.alpha,
                 reg_weights=self.feature_weights,
-            )
-
-    def _train_dynamic(
-        self,
-        X_std: np.ndarray,
-        y_train: np.ndarray,
-        hours_train: np.ndarray,
-    ) -> None:
-        """Train separate IRLS models for peak and off-peak hours.
-
-        ``X_std`` is already standardized by ``train`` (the scaler is fit on the
-        full matrix so both sub-models and the future frame share one scaling).
-        """
-        peak_start = self.dynamic_config['peak_start']
-        peak_end = self.dynamic_config['peak_end']
-        peak_quantile = self.dynamic_config['peak_quantile']
-        offpeak_quantile = self.dynamic_config['offpeak_quantile']
-
-        peak_mask = (hours_train >= peak_start) & (hours_train <= peak_end)
-        offpeak_mask = ~peak_mask
-
-        if np.any(peak_mask):
-            n_peak = int(np.sum(peak_mask))
-            print(f"    - Peak hours ({peak_start}–{peak_end}): "
-                  f"q={peak_quantile:.2f}, {n_peak} samples")
-            self._coeffs_peak = _fit_quantile_irls(
-                X_std[peak_mask], y_train[peak_mask], peak_quantile,
-                self.alpha, reg_weights=self.feature_weights,
-            )
-
-        if np.any(offpeak_mask):
-            n_offpeak = int(np.sum(offpeak_mask))
-            print(f"    - Off-peak hours: q={offpeak_quantile:.2f}, {n_offpeak} samples")
-            self._coeffs_offpeak = _fit_quantile_irls(
-                X_std[offpeak_mask], y_train[offpeak_mask], offpeak_quantile,
-                self.alpha, reg_weights=self.feature_weights,
             )
 
     # ------------------------------------------------------------------
@@ -340,7 +385,11 @@ class QuantileRegressionModel:
 
         Args:
             X:     Feature matrix.
-            hours: Hour-of-day values, required when using dynamic quantile.
+            hours: Accepted for API compatibility; unused. The peak/off-peak
+                   quantile asymmetry is baked into the coefficients at
+                   training time (per-sample quantiles), so prediction is one
+                   continuous surface — no hour-based routing, and therefore
+                   no discontinuity at the window boundaries.
 
         Returns:
             Predicted values, shape (n_samples,).
@@ -351,32 +400,9 @@ class QuantileRegressionModel:
         # any unit mismatch — the scaling is applied per call, after the lag
         # write-backs, inside this method.
         X = self._apply_scaler(np.asarray(X, dtype=np.float64))
-        if self.dynamic_config is not None and hours is not None:
-            return self._predict_dynamic(X, hours)
         if self._coeffs is None:
             raise RuntimeError("Model has not been trained. Call train() first.")
         return _predict_quantile_irls(X, self._coeffs)
-
-    def _predict_dynamic(self, X: np.ndarray, hours: np.ndarray) -> np.ndarray:
-        """Route predictions through the appropriate peak/off-peak model."""
-        peak_start = self.dynamic_config['peak_start']
-        peak_end = self.dynamic_config['peak_end']
-
-        predictions = np.zeros(len(X), dtype=np.float64)
-        peak_mask = (hours >= peak_start) & (hours <= peak_end)
-        offpeak_mask = ~peak_mask
-
-        if np.any(peak_mask) and self._coeffs_peak is not None:
-            predictions[peak_mask] = _predict_quantile_irls(
-                X[peak_mask], self._coeffs_peak
-            )
-
-        if np.any(offpeak_mask) and self._coeffs_offpeak is not None:
-            predictions[offpeak_mask] = _predict_quantile_irls(
-                X[offpeak_mask], self._coeffs_offpeak
-            )
-
-        return predictions
 
     # ------------------------------------------------------------------
     # Evaluation

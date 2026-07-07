@@ -43,7 +43,7 @@ DEFAULT_MAX_FORECAST_HOURS = 48  # 2 days
 DEFAULT_HOUR_OFFSETS: list = []  # rows of {"hour": int, "offset": float kW}
 # Defaults below were retuned from walk-forward backtesting (see tools/cv_sweep.py).
 DEFAULT_HOUR_HARMONICS = 3  # sin/cos harmonics for hour-of-day (0 = linear hour)
-DEFAULT_REG_ALPHA = 0.1  # L2 strength on standardized features (higher over-smooths)
+DEFAULT_REG_ALPHA = 0.1  # smoothing strength (calibrated: ~0.1 light, ~1 visible, ~3 strong)
 DEFAULT_WEIGHT_TIME = 2.0  # influence of time-of-day features (1.0 = neutral)
 DEFAULT_WEIGHT_TEMPERATURE = 0.5  # light temperature influence by default (0 = off, 1 = neutral)
 DEFAULT_WEIGHT_LAGS = 0.5  # influence of power-lag features

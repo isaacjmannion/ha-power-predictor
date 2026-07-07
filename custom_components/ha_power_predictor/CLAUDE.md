@@ -42,11 +42,14 @@ linear `"hour"`). The coordinator appends `power_lag_1..n_power_lags` then
 `add_cyclical_features` (a pure function of `hour`) on **both** the training df
 and the future df, so historical and future frames encode identically. The raw
 `hour` column is kept in the DataFrame regardless (it is the cyclical-feature
-source, and the linear `hour` feature when `hour_harmonics=0`). For peak/off-peak
-routing, the coordinator does **not** pass this UTC `hour` — it derives a
-**local** hour-of-day from the timestamps (`tz_convert(...).dt.hour`) and passes
-that to `train`/`predict`/`predict_iterative`, so the peak window is the user's
-local clock. See the "Times are UTC inside the pipeline" note in the repo CLAUDE.md.
+source, and the linear `hour` feature when `hour_harmonics=0`). For the
+peak/off-peak quantile assignment, the coordinator does **not** pass this UTC
+`hour` — it derives a **local** hour-of-day from the timestamps
+(`tz_convert(...).dt.hour`) and passes that to `train` (where it selects each
+sample's quantile) and on through `predict`/`predict_iterative` (where it is
+accepted but unused — the fit is one continuous surface), so the peak window is
+the user's local clock. See the "Times are UTC inside the pipeline" note in the
+repo CLAUDE.md.
 
 The model is trained and predicts on `df[features].values` in this exact column
 order, and `predict_iterative` finds the power-lag columns by substring
@@ -91,7 +94,14 @@ do **not** (see "Hour-of-day offsets" below).
   `(XᵀWX + diag(reg))β = XᵀWy` each iteration, warm-started from OLS. Pure numpy on
   purpose (lighter/faster than sklearn's LP solver for this data size). The
   intercept is an augmented leading ones column and is **not** regularised
-  (`reg_diag[0] = 0`).
+  (`reg_diag[0] = 0`). The quantile may be a **per-sample vector** (how
+  peak/off-peak works — see below). The pinball loss is Huber-smoothed within
+  ±0.1% of the response dispersion and the ridge is anchored to that same
+  dispersion (`reg_j = n·alpha/(s·w_j²)`), so each iteration is a monotone
+  majorize-minimize step on one fixed convex objective — deterministic
+  convergence — and a given `alpha` smooths comparably on any home's data
+  (previously the blown-up IRLS weights silently swamped the penalty, making
+  `alpha` and the influence weights near-inert).
 - **Standardization + per-feature weights:** the coordinator constructs the model
   with `standardize=True`, a configurable `alpha`, and a `feature_weights` vector.
   `train` fits **one global** z-score scaler on the full training matrix (shared by
@@ -104,13 +114,18 @@ do **not** (see "Hour-of-day offsets" below).
   keep writing raw-kW predictions into the `power_lag_*` columns without a unit
   mismatch. Defaults (`standardize=False`, `alpha=0.01`, `feature_weights=None`)
   preserve the original behavior for the bare-solver unit tests.
-- **Dynamic peak/off-peak:** when `dynamic_config` is provided (it always is from
-  the coordinator), `train` fits **two separate models** — one on hours where
-  `peak_start <= hour <= peak_end`, one on the rest — and `predict` routes each
-  row to the matching model by the `hours` array it is given (the coordinator
-  passes **local** hour-of-day, so the window is the user's local clock). The
-  static single-quantile path (`self._coeffs`) still exists for
-  `dynamic_config=None` but the coordinator does not use it.
+- **Dynamic peak/off-peak = ONE fit, per-sample quantile:** when
+  `dynamic_config` is provided (it always is from the coordinator), `train`
+  assigns each training sample its window's quantile (`peak_quantile` where
+  `peak_start <= hour <= peak_end`, else `offpeak_quantile` — the coordinator
+  passes **local** hour-of-day, so the window is the user's local clock) and
+  runs a **single** IRLS fit with that quantile vector. There are no
+  peak/off-peak sub-models: the hour features carry the level difference, so
+  the fitted curve is continuous across the window boundary (the old
+  two-sub-model design produced a step there and its 10-hour cyclical
+  sub-basis was badly conditioned), and no window can be left untrained.
+  `predict` therefore **ignores** its `hours` argument (kept for API
+  stability) — the asymmetry lives in the training loss only.
 - **Auto-regressive forecasting (`predict_iterative`):** future power lags are
   unknown, so it steps row-by-row, writing a value back into the `power_lag_*`
   columns of subsequent rows. If there are **no** power-lag features it
@@ -125,8 +140,8 @@ do **not** (see "Hour-of-day offsets" below).
     stable while each reported hour still carries its quantile margin.
     `state_model=None` feeds `model`'s own predictions back (legacy behaviour;
     preserved for the bare-solver unit tests).
-- `train`/`_train_dynamic` use `print(...)` for progress (visible in HA logs
-  when training runs in the executor) — not the module logger. Leave as-is unless
+- `train` uses `print(...)` for progress (visible in HA logs when training
+  runs in the executor) — not the module logger. Leave as-is unless
   intentionally changing logging.
 
 ## `_build_future_df` (the trickiest function)
