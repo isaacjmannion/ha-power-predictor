@@ -83,8 +83,70 @@ def test_add_lagged_features_shifts_and_drops_leading_rows():
     assert out["temp_lag_1"].iloc[0] == 11.0
 
 
-def test_get_default_features_exact_order():
-    assert dp.get_default_features() == ["year", "month", "day_of_week", "hour", "temperature"]
+def test_get_default_features_linear_hour_when_no_harmonics():
+    assert dp.get_default_features(0) == ["year", "month", "day_of_week", "hour", "temperature"]
+
+
+def test_get_default_features_cyclical_default_two_harmonics():
+    assert dp.get_default_features() == [
+        "year", "month", "day_of_week",
+        "hour_sin_1", "hour_cos_1", "hour_sin_2", "hour_cos_2",
+        "temperature",
+    ]
+
+
+def test_get_default_features_one_harmonic():
+    assert dp.get_default_features(1) == [
+        "year", "month", "day_of_week", "hour_sin_1", "hour_cos_1", "temperature",
+    ]
+
+
+def test_add_cyclical_features_values_and_period():
+    df = pd.DataFrame({"hour": [0, 6, 12, 18]})
+    out = dp.add_cyclical_features(df, hour_harmonics=2)
+    assert {"hour_sin_1", "hour_cos_1", "hour_sin_2", "hour_cos_2"} <= set(out.columns)
+    # First harmonic: sin(2*pi*hour/24), cos(2*pi*hour/24)
+    assert out["hour_sin_1"].tolist() == pytest.approx([0.0, 1.0, 0.0, -1.0], abs=1e-9)
+    assert out["hour_cos_1"].tolist() == pytest.approx([1.0, 0.0, -1.0, 0.0], abs=1e-9)
+    # Raw hour column is preserved untouched (needed for peak/off-peak routing).
+    assert out["hour"].tolist() == [0, 6, 12, 18]
+
+
+def test_add_cyclical_features_hour_0_and_24_match():
+    # The encoding is periodic: hour 0 and a notional hour 24 map identically.
+    out = dp.add_cyclical_features(pd.DataFrame({"hour": [0, 24]}), hour_harmonics=2)
+    assert out["hour_sin_1"].iloc[0] == pytest.approx(out["hour_sin_1"].iloc[1], abs=1e-9)
+    assert out["hour_cos_2"].iloc[0] == pytest.approx(out["hour_cos_2"].iloc[1], abs=1e-9)
+
+
+def test_add_cyclical_features_zero_harmonics_noop():
+    df = pd.DataFrame({"hour": [1, 2, 3]})
+    assert dp.add_cyclical_features(df, hour_harmonics=0) is df
+
+
+def test_build_feature_weights_groups_and_order():
+    features = [
+        "year", "month", "day_of_week",
+        "hour_sin_1", "hour_cos_1",
+        "temperature",
+        "power_lag_1", "power_lag_2",
+        "temp_lag_1",
+    ]
+    w = dp.build_feature_weights(
+        features, {"time": 3.0, "temperature": 0.5, "lags": 2.0}
+    )
+    assert w.tolist() == [1.0, 1.0, 1.0, 3.0, 3.0, 0.5, 2.0, 2.0, 0.5]
+
+
+def test_build_feature_weights_linear_hour_in_time_group():
+    w = dp.build_feature_weights(["hour", "temperature"], {"time": 4.0})
+    assert w.tolist() == [4.0, 1.0]
+
+
+def test_build_feature_weights_missing_groups_default_neutral():
+    features = ["hour_sin_1", "temperature", "power_lag_1"]
+    w = dp.build_feature_weights(features, {})
+    assert w.tolist() == [1.0, 1.0, 1.0]
 
 
 def test_normalize_hour_offsets_list_of_rows():
@@ -116,3 +178,40 @@ def test_normalize_hour_offsets_empty_and_none():
     assert dp.normalize_hour_offsets([]) == {}
     assert dp.normalize_hour_offsets(None) == {}
     assert dp.normalize_hour_offsets({}) == {}
+
+
+def test_build_export_payload_counts_config_and_meta():
+    power = [{"start": 1700000000.0, "mean": 1.5}, {"start": 1700003600.0, "mean": 2.0}]
+    temp = [{"start": 1700000000.0, "mean": 20.0}]
+    cfg = {"power_entity": "sensor.p", "hour_harmonics": 2}
+    payload = dp.build_export_payload(power, temp, cfg, meta={"version": "0.3.0"})
+    assert payload["meta"]["n_power_rows"] == 2
+    assert payload["meta"]["n_temperature_rows"] == 1
+    assert payload["meta"]["version"] == "0.3.0"
+    assert payload["meta"]["schema_version"] == 1
+    assert payload["config"] == cfg
+    assert payload["power_stats"][0] == {"start": 1700000000.0, "mean": 1.5}
+
+
+def test_build_export_payload_normalizes_datetime_start_to_epoch():
+    aware = datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc)
+    payload = dp.build_export_payload([{"start": aware, "mean": 1.0}], [], {})
+    start = payload["power_stats"][0]["start"]
+    assert isinstance(start, float)
+    assert start == aware.timestamp()
+
+
+def test_build_export_payload_preserves_none_means():
+    payload = dp.build_export_payload([{"start": 1700000000.0, "mean": None}], [], {})
+    assert payload["power_stats"][0]["mean"] is None
+
+
+def test_export_rows_round_trip_through_process():
+    base = 1_700_000_000
+    power = [{"start": base + 3600 * i, "mean": 1.0 + i} for i in range(3)]
+    temp = [{"start": base + 3600 * i, "mean": 20.0 + i} for i in range(3)]
+    payload = dp.build_export_payload(power, temp, {})
+    df = dp.process_ha_statistics(payload["power_stats"], payload["temperature_stats"])
+    assert len(df) == 3
+    assert df["consumption"].tolist() == [1.0, 2.0, 3.0]
+    assert df["temperature"].tolist() == [20.0, 21.0, 22.0]

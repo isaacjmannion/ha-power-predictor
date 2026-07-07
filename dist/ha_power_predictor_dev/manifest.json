@@ -1,6 +1,6 @@
 {
-  "domain": "ha_power_predictor",
-  "name": "HA Power Predictor",
+  "domain": "ha_power_predictor_dev",
+  "name": "HA Power Predictor (Dev)",
   "codeowners": ["@isaacjmannion"],
   "config_flow": true,
   "dependencies": ["recorder"],

@@ -1,6 +1,6 @@
 """Constants for HA Power Predictor."""
 
-DOMAIN = "ha_power_predictor"
+DOMAIN = "ha_power_predictor_dev"
 
 PLATFORMS = ["sensor", "button"]
 
@@ -28,7 +28,7 @@ CONF_WEIGHT_TEMPERATURE = "weight_temperature"
 CONF_WEIGHT_LAGS = "weight_lags"
 
 # Defaults
-DEFAULT_INTEGRATION_NAME = "Power Predictor"
+DEFAULT_INTEGRATION_NAME = "Power Predictor Dev"
 DEFAULT_N_POWER_LAGS = 5
 DEFAULT_N_TEMP_LAGS = 0  # current temperature is enough by default; add 1-2 only if it helps
 DEFAULT_PEAK_START = 11  # local clock hour (peak/off-peak routes on local time)
